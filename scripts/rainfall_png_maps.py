@@ -568,7 +568,7 @@ def compute_incremental_grids(results, forecast_hours=None):
 
 # ── GFS FETCH (all hours) ────────────────────────────────────────────────────
 
-def fetch_gfs_all_hours(res=0.25, max_hour=None):
+def fetch_gfs_all_hours(res=0.25, max_hour=None, cycle='auto'):
     """
     Find the latest available GFS run, then download forecast hours at every
     24h 'Day N' milestone up to that cycle's max lead time. All four GFS
@@ -579,12 +579,29 @@ def fetch_gfs_all_hours(res=0.25, max_hour=None):
     now = datetime.now(timezone.utc)
 
     # Find latest available run
+    # Build candidate list based on cycle argument:
+    # - 'auto': detect latest available (for cron runs — tries current cycle only,
+    #           does NOT fall back to a different cycle to avoid serving stale data)
+    # - explicit '00'/'06'/'12'/'18': lock to that cycle only
     candidates = []
-    for days_back in range(3):
-        for run_hour in [18, 12, 6, 0]:
+    if cycle != 'auto':
+        # Manual/explicit cycle — try only that specific hour
+        target_hour = int(cycle)
+        for days_back in range(3):
             dt = (now - timedelta(days=days_back)).replace(
-                hour=run_hour, minute=0, second=0, microsecond=0)
-            candidates.append(dt)
+                hour=target_hour, minute=0, second=0, microsecond=0)
+            if dt <= now:
+                candidates.append(dt)
+    else:
+        # Auto mode — try most recent cycles but DO NOT cross cycle boundaries
+        # (e.g. at 03:30 UTC we expect 00z; we should not fall back to yesterday 18z)
+        # Try last 2 days of the two scheduled cycles (00z and 12z) only
+        for days_back in range(2):
+            for run_hour in [12, 0]:
+                dt = (now - timedelta(days=days_back)).replace(
+                    hour=run_hour, minute=0, second=0, microsecond=0)
+                if dt <= now:
+                    candidates.append(dt)
 
     run_dt = None
     print("  Finding latest available GFS run...")
@@ -671,7 +688,7 @@ def fetch_gfs_all_hours(res=0.25, max_hour=None):
 
 # ── ECMWF FETCH (all hours) ──────────────────────────────────────────────────
 
-def fetch_ecmwf_all_hours(res=0.25, max_hour=None):
+def fetch_ecmwf_all_hours(res=0.25, max_hour=None, cycle='auto'):
     """
     Download ECMWF IFS tp at every 24h 'Day N' milestone the ACTUAL latest
     run supports. 00Z/12Z cycles extend to 360h (15 days); 06Z/18Z stop at
@@ -1220,9 +1237,9 @@ def render_png(lats, lons, grid, india_composite_gdf, india_states_gdf,
 
     # Bottom strip text segments (mixed Latin + Gujarati)
     gu_line1_segs = [
-        ('હવામાન મોડેલ :-  ', False),
+        ('હવામાન મોડલ :-  ', False),
         (model_label,          True),
-        ('  |  મોડેલ આધાર સમય :-  ', False),
+        ('  |  મોડલ આધાર સમય :-  ', False),
         (gu_init,              False),
     ]
     gu_line2 = f'કુલ સંચિત વરસાદ (મિલિમીટર) :-  {gu_from}  થી  {gu_to}  સુધી'
@@ -1486,7 +1503,7 @@ def render_png(lats, lons, grid, india_composite_gdf, india_states_gdf,
 
 # ── PNG META JSON ─────────────────────────────────────────────────────────────
 
-def save_png_meta(model_results, out_dir):
+def save_png_meta(model_results, out_dir, existing_meta=None):
     """
     Write meta.json for the frontend viewer (rainfall_viewer_final.html).
     Contains only what the frontend needs to know about available PNG maps:
@@ -1506,6 +1523,15 @@ def save_png_meta(model_results, out_dir):
         "fine_cadence_hours": FINE_CADENCE_HOURS,
         "models":             {},
     }
+
+    # Preserve models from existing meta.json that were NOT updated this run.
+    # Example: GFS failed this run but ECMWF succeeded — keep old GFS entry so
+    # the frontend still shows GFS data from the previous successful run.
+    if existing_meta and 'models' in existing_meta:
+        for mk, model_data in existing_meta['models'].items():
+            if mk not in model_results:
+                meta['models'][mk] = model_data
+                print(f"  [META] Preserved existing {mk} entry (not updated this run)")
 
     for mk, (run_dt, results) in model_results.items():
         # Only daily milestones are rendered as PNGs
@@ -1562,8 +1588,10 @@ def main():
     parser.add_argument('--india-states-geojson', default=INDIA_STATES_DEFAULT,
                         help='Path to india_state.geojson (geohacker, state border lines)')
     parser.add_argument('--model',   choices=['GFS', 'ECMWF', 'both'], default='both',
-                        help="Which model(s) to fetch. Default 'both' since the frontend "
-                             "now switches between GFS and ECMWF live.")
+                        help="Which model(s) to fetch. Default 'both'.")
+    parser.add_argument('--cycle',  default='auto',
+                        help='Model cycle UTC hour: auto, 00, 06, 12, 18. '
+                             'auto = detect latest. Explicit locks to that cycle only.')
     parser.add_argument('--res',     type=float, default=0.25)
     parser.add_argument('--outdir',  default=OUT_DIR)
     parser.add_argument('--no-png',  action='store_true',
@@ -1598,9 +1626,9 @@ def main():
         print(f"\n[{mk}] Fetching forecast for PNG rendering...")
         try:
             if mk == 'GFS':
-                run_dt, results = fetch_gfs_all_hours(res=args.res)
+                run_dt, results = fetch_gfs_all_hours(res=args.res, cycle=args.cycle)
             else:
-                run_dt, results = fetch_ecmwf_all_hours(res=args.res)
+                run_dt, results = fetch_ecmwf_all_hours(res=args.res, cycle=args.cycle)
 
             # None means the run is not yet complete — skip this model.
             if run_dt is None or results is None:
@@ -1644,7 +1672,18 @@ def main():
 
     if model_results:
         print(f"\n[META] Writing meta.json for frontend...")
-        save_png_meta(model_results, args.outdir)
+        # Merge with existing meta.json to preserve models that weren't updated this run.
+        # This prevents GFS disappearing from meta.json when only ECMWF ran successfully.
+        existing_meta_path = os.path.join(args.outdir, 'existing_meta.json')
+        existing_meta = None
+        if os.path.exists(existing_meta_path):
+            try:
+                with open(existing_meta_path) as f:
+                    existing_meta = json.load(f)
+                print(f"  [META] Found existing meta.json — preserving models not updated this run")
+            except Exception as e:
+                print(f"  [META] Could not read existing meta.json: {e}")
+        save_png_meta(model_results, args.outdir, existing_meta=existing_meta)
         print(f"\n[DONE] PNG rendering complete for: {list(model_results.keys())}")
     else:
         print("\n[DONE] No model produced PNG output.")
