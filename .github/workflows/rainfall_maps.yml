@@ -45,11 +45,16 @@ jobs:
           sudo apt-get install -y \
             libgeos-dev libproj-dev proj-data proj-bin \
             libeccodes-dev libeccodes-tools \
-            libraqm-dev libfribidi-dev libharfbuzz-dev
+            libraqm-dev libfribidi-dev libharfbuzz-dev \
+            python3-eccodes
 
       # ── 4. Install Python dependencies ──────────────────────────────────────
       - name: Install Python dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install --upgrade pip
+          pip install eccodes==1.6.1
+          pip install cfgrib xarray
+          pip install -r requirements.txt
 
       # ── 5. Determine model to run ────────────────────────────────────────────
       - name: Set model parameter
@@ -81,6 +86,7 @@ jobs:
       # ── 7. Upload outputs to Cloudflare R2 ───────────────────────────────────
       - name: Upload to Cloudflare R2
         run: python scripts/upload_to_r2.py
+        working-directory: ${{ github.workspace }}
         env:
           R2_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
