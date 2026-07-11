@@ -1,1 +1,12 @@
-
+requests
+numpy
+matplotlib
+cartopy
+geopandas
+shapely
+scipy
+cfgrib
+eccodes
+ecmwf-opendata
+Pillow
+boto3
