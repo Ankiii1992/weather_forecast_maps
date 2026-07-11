@@ -1,1 +1,98 @@
+name: Rainfall Forecast Maps
 
+on:
+  schedule:
+    # Run twice daily — for 00z and 12z GFS/ECMWF cycles only.
+    # Offset by 3.5 hours to allow model data to be fully published on servers.
+    # 00z run: data typically available by ~03:00-04:00 UTC
+    # 12z run: data typically available by ~15:00-16:00 UTC
+    - cron: '30 3 * * *'   # 03:30 UTC → for 00z run
+    - cron: '30 15 * * *'  # 15:30 UTC → for 12z run
+  workflow_dispatch:
+    # Allow manual trigger from GitHub Actions UI for testing
+    inputs:
+      model:
+        description: 'Model to run (GFS, ECMWF, or both)'
+        required: true
+        default: 'both'
+        type: choice
+        options:
+          - both
+          - GFS
+          - ECMWF
+
+jobs:
+  generate-maps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90   # generous timeout for data fetch + render
+
+    steps:
+      # ── 1. Checkout repo ────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Set up Python ────────────────────────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      # ── 3. Install system dependencies for cartopy/cfgrib ───────────────────
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            libgeos-dev libproj-dev proj-data proj-bin \
+            libeccodes-dev libeccodes-tools \
+            libraqm-dev libfribidi-dev libharfbuzz-dev
+
+      # ── 4. Install Python dependencies ──────────────────────────────────────
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      # ── 5. Determine model to run ────────────────────────────────────────────
+      - name: Set model parameter
+        id: model
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "model=${{ github.event.inputs.model }}" >> $GITHUB_OUTPUT
+          else
+            echo "model=both" >> $GITHUB_OUTPUT
+          fi
+
+      # ── 6. Run PNG map generation ────────────────────────────────────────────
+      - name: Generate rainfall PNG maps
+        run: |
+          python scripts/rainfall_png_maps.py \
+            --district-geojson geodata/gujarat_district_clean.geojson \
+            --india-geojson geodata/india-composite.geojson \
+            --india-states-geojson geodata/india_state.geojson \
+            --model ${{ steps.model.outputs.model }} \
+            --outdir output
+        env:
+          # Pass R2 credentials so script can upload after rendering
+          R2_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT_URL:      ${{ secrets.R2_ENDPOINT_URL }}
+          R2_BUCKET_NAME:       ${{ secrets.R2_BUCKET_NAME }}
+          R2_PUBLIC_URL:        ${{ secrets.R2_PUBLIC_URL }}
+
+      # ── 7. Upload outputs to Cloudflare R2 ───────────────────────────────────
+      - name: Upload to Cloudflare R2
+        run: python scripts/upload_to_r2.py
+        env:
+          R2_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT_URL:      ${{ secrets.R2_ENDPOINT_URL }}
+          R2_BUCKET_NAME:       ${{ secrets.R2_BUCKET_NAME }}
+          R2_PUBLIC_URL:        ${{ secrets.R2_PUBLIC_URL }}
+
+      # ── 8. Summary ───────────────────────────────────────────────────────────
+      - name: Print summary
+        run: |
+          echo "## Rainfall Maps Generated" >> $GITHUB_STEP_SUMMARY
+          echo "Model: ${{ steps.model.outputs.model }}" >> $GITHUB_STEP_SUMMARY
+          echo "Time: $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "Output files:" >> $GITHUB_STEP_SUMMARY
+          find output -name "*.png" | wc -l | xargs -I{} echo "  {} PNG files" >> $GITHUB_STEP_SUMMARY
