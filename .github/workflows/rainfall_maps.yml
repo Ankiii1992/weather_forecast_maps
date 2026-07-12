@@ -1,11 +1,11 @@
 name: Rainfall Forecast Maps
 
 on:
-  schedule:
+  #schedule:
     # Run twice daily — for 00z and 12z cycles only.
     # Offset by 3.5 hours to allow model data to be fully published.
-    - cron: '30 3 * * *'   # 03:30 UTC → for 00z run
-    - cron: '30 15 * * *'  # 15:30 UTC → for 12z run
+    #- cron: '30 3 * * *'   # 03:30 UTC → for 00z run
+    #- cron: '30 15 * * *'  # 15:30 UTC → for 12z run
 
   workflow_dispatch:
     # Manual trigger — pick model and cycle explicitly.
