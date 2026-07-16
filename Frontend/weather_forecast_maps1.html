@@ -1,0 +1,1254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rainfall Forecast — Gujaratweatherman</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&family=Manrope:wght@400;500;600;700&family=Noto+Sans+Gujarati:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+/* ── THEME ── */
+#rf-root{
+  --bg:#0d1825;--card:#111d2b;--card2:#162030;
+  --accent:#2f6fed;--accent2:rgba(47,111,237,.18);
+  --text:#e8f0fe;--muted:#7a91a8;--dim:#3a5068;
+  --border:#1a2d42;
+  --font-gu:'Noto Sans Gujarati',sans-serif;
+  --font-en:'Manrope',sans-serif;
+  --font-data:'Outfit',sans-serif;
+}
+#rf-root.light-mode{
+  --bg:#f0f4f8;--card:#ffffff;--card2:#e8eef5;
+  --accent:#1a56db;--accent2:rgba(26,86,219,.10);
+  --text:#0d1825;--muted:#4a6080;--dim:#8a9ab0;
+  --border:#ccd6e0;
+}
+#rf-root.light-mode .map-area{background:#e0e8f0}
+#rf-root.light-mode .glass{background:rgba(255,255,255,.92);border-color:rgba(0,0,0,.1);color:#0d1825}
+#rf-root.light-mode .map-pane{background:#e0e8f0}
+#rf-root.light-mode .pane-header{background:rgba(255,255,255,.7)}
+
+/* ── BASE ── */
+#rf-root [data-gu]{display:none}
+#rf-root.lang-gu [data-en]{display:none}
+#rf-root.lang-gu [data-gu]{display:revert}
+html,body{height:auto;}
+#rf-root{
+  height:100vh;overflow:hidden;
+  background:var(--bg);color:var(--text);font-family:var(--font-en);
+  display:flex;flex-direction:column;
+  /* WordPress breakout — same trick as MJO monitoring page */
+  position:relative;
+  left:50%;
+  right:50%;
+  margin-left:-50vw;
+  margin-right:-50vw;
+  width:100vw;
+  max-width:100vw;
+}
+
+/* ── UTILITY ── */
+/* Used to hide normal-view elements when compare is active */
+.rf-hide{display:none!important}
+
+/* ── AUTHOR BAR ── */
+.author-bar{background:#070d14;border-bottom:1px solid #1a2d42;text-align:center;padding:7px 16px;font-family:var(--font-data);font-size:13px;font-weight:700;letter-spacing:.04em;color:#7a91a8;flex-shrink:0}
+.author-bar b{color:#e8f0fe}
+#rf-root.light-mode .author-bar{background:#1a2d42}
+
+/* ── TOPBAR ── */
+.topbar{height:46px;background:var(--card);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 12px;gap:8px;flex-shrink:0;overflow:hidden}
+.sep{width:1px;height:18px;background:var(--border);flex-shrink:0}
+.model-tabs{display:flex;gap:2px;background:var(--bg);border:1px solid var(--border);border-radius:7px;padding:3px;flex-shrink:0}
+.model-tab{font-family:var(--font-data);font-size:12px;font-weight:700;padding:3px 12px;border-radius:5px;border:none;cursor:pointer;color:var(--muted);background:transparent;transition:all .15s;letter-spacing:.04em}
+.model-tab.active{background:var(--accent);color:#fff}
+.model-tab:disabled{opacity:.35;cursor:not-allowed}
+/* compare tab */
+.model-tab.cmp-tab{color:#a78eee}
+.model-tab.cmp-tab.active{background:rgba(131,96,223,.25);color:#a78eee;border:1px solid rgba(131,96,223,.35)}
+/* single run time badge */
+.run-time{display:flex;flex-direction:column;gap:0;line-height:1.2;flex-shrink:0;background:var(--accent2);border:1px solid rgba(47,111,237,.25);border-radius:7px;padding:3px 9px}
+.run-time-header{font-family:var(--font-data);font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--accent)}
+.rt-ist{font-family:var(--font-data);font-size:11px;font-weight:700;color:var(--text)}
+.rt-utc{font-family:var(--font-data);font-size:9px;color:var(--dim)}
+/* two run time badges (compare mode) */
+.run-time-cmp{display:none;flex-shrink:0;gap:5px}
+.run-time-cmp.show{display:flex}
+.run-time-single.hide{display:none}
+.rt-ecmwf{background:rgba(29,158,117,.1);border-color:rgba(29,158,117,.2)}
+.rt-ecmwf .run-time-header{color:#1d9e75}
+/* sync badge */
+.sync-badge{display:none;align-items:center;gap:4px;font-family:var(--font-data);font-size:10px;font-weight:700;color:#4dd4a0;background:rgba(29,158,117,.1);border:1px solid rgba(29,158,117,.25);border-radius:6px;padding:2px 8px;flex-shrink:0}
+.sync-badge.show{display:flex}
+.dd-wrap{display:flex;align-items:center;gap:5px;flex-shrink:0}
+.dd-label{font-family:var(--font-data);font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.07em}
+.dd{font-family:var(--font-data);font-size:11px;font-weight:600;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 8px;cursor:pointer;transition:border-color .15s}
+.overlay-tabs{display:flex;gap:2px;background:var(--bg);border:1px solid var(--border);border-radius:7px;padding:3px;flex-shrink:0}
+.overlay-tab{font-family:var(--font-data);font-size:11px;font-weight:600;padding:3px 9px;border-radius:5px;border:none;cursor:pointer;color:var(--muted);background:transparent;transition:all .12s;white-space:nowrap}
+.overlay-tab.active{background:var(--card2);color:var(--text);border:1px solid var(--border)}
+.overlay-tabs-wrap{display:none;flex-shrink:0}
+.spacer{flex:1;min-width:0}
+.theme-btn{font-size:14px;padding:3px 7px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer}
+.lang-btn{font-size:11px;font-weight:700;font-family:var(--font-data);padding:3px 9px;border-radius:20px;border:1px solid var(--border);color:var(--muted);background:transparent;cursor:pointer}
+.lang-btn.active{border-color:var(--accent);color:var(--accent);background:var(--accent2)}
+
+/* ── COMPARE NOTE BANNER ── */
+.compare-note{display:none;flex-shrink:0;align-items:center;gap:7px;padding:4px 12px;background:rgba(131,96,223,.08);border-bottom:1px solid rgba(131,96,223,.18);font-family:var(--font-data);font-size:10px;color:#8a72c8}
+.compare-note.show{display:flex}
+.compare-note b{color:#a78eee}
+
+/* ── MAIN LAYOUT ── */
+.main-layout{display:flex;flex:1;min-height:0;overflow:hidden}
+
+/* ── MAP AREA (normal — unchanged) ── */
+.map-area{flex:1;min-width:0;background:#080f16;position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.map-img{max-width:100%;max-height:100%;object-fit:contain;display:none;transition:opacity .18s}
+.map-img.fading{opacity:.3}
+.placeholder{display:flex;flex-direction:column;align-items:center;gap:10px;padding:40px;font-family:var(--font-data);font-size:13px;color:var(--muted);text-align:center}
+.glass{background:rgba(7,13,22,.84);border:1px solid rgba(255,255,255,.07);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-radius:6px;padding:4px 10px;font-family:var(--font-data);font-size:11px;font-weight:700;color:var(--text);white-space:nowrap}
+.glass.sm{font-size:10px;font-weight:500;color:var(--muted)}
+.ov-tl{position:absolute;top:9px;left:10px;display:flex;flex-direction:column;gap:4px;pointer-events:none;z-index:5}
+.ov-tr{position:absolute;top:9px;right:10px;display:flex;flex-direction:column;align-items:flex-end;gap:4px;pointer-events:none;z-index:5}
+.map-spinner{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);display:none;z-index:20}
+.map-spinner.show{display:block}
+.spinner{width:30px;height:30px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.zoom-controls{position:absolute;bottom:12px;left:10px;display:flex;flex-direction:column;gap:3px;z-index:10}
+.zoom-btn{width:26px;height:26px;border-radius:5px;border:1px solid rgba(255,255,255,.15);background:rgba(13,24,37,.8);color:#e8f0fe;font-size:15px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .12px}
+.zoom-btn:hover{background:rgba(47,111,237,.5);border-color:var(--accent)}
+#rf-root.light-mode .zoom-btn{background:rgba(255,255,255,.88);color:#0d1825;border-color:rgba(0,0,0,.15)}
+.gif-progress{display:none;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:30;background:rgba(7,13,22,.92);border:1px solid var(--border);border-radius:10px;padding:16px 24px;text-align:center;font-family:var(--font-data);color:var(--text)}
+.gif-progress.show{display:block}
+.gif-progress-bar{height:4px;border-radius:3px;background:var(--dim);margin-top:8px;overflow:hidden}
+.gif-progress-fill{height:100%;background:var(--accent);border-radius:3px;width:0%;transition:width .2s}
+
+/* ── RIGHT PANEL (normal — unchanged) ── */
+.right-panel{width:35%;min-width:260px;max-width:420px;background:var(--card);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;flex-shrink:0}
+.rp-sec{padding:10px 12px;border-bottom:1px solid var(--border);flex-shrink:0}
+.rp-lbl{font-family:var(--font-data);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);margin-bottom:6px}
+.fv-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.fv-block{display:flex;flex-direction:column;gap:1px}
+.fv-lbl{font-family:var(--font-data);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--dim)}
+.fv-val{font-family:var(--font-data);font-size:11px;font-weight:700;color:var(--text);white-space:nowrap}
+.fv-val.accent{color:var(--accent)}
+.fv-arrow{color:var(--dim);font-size:13px;flex-shrink:0}
+.fxx-slider{width:100%;-webkit-appearance:none;appearance:none;height:4px;border-radius:4px;outline:none;cursor:pointer;background:linear-gradient(to right,var(--accent) 0%,var(--accent) var(--pct,0%),var(--dim) var(--pct,0%),var(--dim) 100%);margin-bottom:3px}
+.fxx-slider::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;background:var(--accent);border:2px solid #fff;cursor:pointer}
+.fxx-slider::-moz-range-thumb{width:13px;height:13px;border-radius:50%;background:var(--accent);border:2px solid #fff;cursor:pointer}
+.slider-ticks{display:flex}
+.stk{font-family:var(--font-data);font-size:7.5px;color:var(--dim);flex:1;text-align:center}
+.stk.active{color:var(--accent);font-weight:700}
+.ctrl-row{display:flex;gap:5px;align-items:center;margin-bottom:8px}
+.play-btn{font-size:10.5px;padding:4px 10px;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:var(--font-data);font-weight:700;transition:all .12s;flex:1}
+.play-btn.playing{background:var(--accent);color:#fff;border-color:var(--accent)}
+.dl-btn{font-size:10px;font-weight:700;padding:4px 8px;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:var(--font-data);transition:all .12s;white-space:nowrap}
+.dl-btn:hover{border-color:var(--accent);color:var(--accent)}
+.hour-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:3px}
+.hbox{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:5px 2px;border:1px solid var(--border);border-radius:5px;cursor:pointer;background:var(--card2);transition:all .1s}
+.hbox:hover{border-color:var(--accent);background:var(--accent2)}
+.hbox.active{border-color:var(--accent);background:var(--accent)}
+.hbox-main{font-family:var(--font-data);font-size:13px;font-weight:700;color:var(--muted);line-height:1}
+.hbox.active .hbox-main,.hbox:hover:not(.active) .hbox-main{color:#fff}
+.hbox-sub{font-family:var(--font-data);font-size:8px;font-weight:600;color:var(--dim)}
+.hbox.active .hbox-sub{color:rgba(255,255,255,.6)}
+.disc-header{display:flex;justify-content:space-between;align-items:center;cursor:pointer;padding:10px 12px;border-bottom:1px solid var(--border)}
+.disc-title-lbl{font-family:var(--font-data);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--dim)}
+.disc-chevron{font-size:12px;color:var(--dim);transition:transform .2s;line-height:1}
+.disc-chevron.open{transform:rotate(180deg)}
+.disc-body{padding:10px 12px;font-size:10.5px;color:var(--muted);line-height:1.7;display:none;border-bottom:1px solid var(--border)}
+.disc-body.open{display:block}
+.disc-footer{padding:8px 12px;font-size:10px;color:var(--dim);font-family:var(--font-data)}
+.error-banner{background:rgba(220,50,50,.12);border:1px solid rgba(220,50,50,.3);border-radius:6px;padding:7px 12px;font-family:var(--font-data);font-size:11px;color:#f87171;margin:6px 12px;display:none}
+.error-banner.show{display:block}
+
+/* ── COMPARE VIEW (sibling of map-area and right-panel inside .main-layout) ── */
+.compare-view{display:none;flex:1;min-width:0;min-height:0;overflow:hidden}
+.compare-view.show{display:flex}
+
+/* compare left panel */
+.cmp-left{width:210px;background:var(--bg);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;overflow-y:auto}
+.cmp-sec{padding:9px 10px;border-bottom:1px solid var(--border);flex-shrink:0}
+.cmp-lbl{font-family:var(--font-data);font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);margin-bottom:6px}
+.pane-config{background:var(--card);border:1px solid var(--border);border-radius:7px;padding:8px;margin-bottom:5px}
+.pane-config:last-child{margin-bottom:0}
+.pc-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.mb-gfs{font-family:var(--font-data);font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.04em;background:rgba(47,111,237,.25);color:#7aabff;border:1px solid rgba(47,111,237,.35)}
+.mb-ecmwf{font-family:var(--font-data);font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.04em;background:rgba(29,158,117,.2);color:#4dd4a0;border:1px solid rgba(29,158,117,.35)}
+.pc-res{font-family:var(--font-data);font-size:9px;color:var(--dim)}
+.pc-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:3px}
+.pc-key{font-family:var(--font-data);font-size:9px;color:var(--muted);font-weight:600}
+.pc-val{font-family:var(--font-data);font-size:10px;color:var(--text);font-weight:600}
+.pc-step-row{display:flex;align-items:center;gap:5px;margin-top:5px}
+.pc-step-lbl{font-family:var(--font-data);font-size:9px;color:var(--dim);white-space:nowrap}
+.pc-step-val{font-family:var(--font-data);font-size:9px;color:var(--accent);font-weight:700}
+.pc-step-synced{font-family:var(--font-data);font-size:9px;color:var(--dim);font-weight:600}
+.cmp-export{display:flex;gap:4px}
+.cmp-dl-btn{font-family:var(--font-data);font-size:10px;font-weight:700;padding:5px;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;flex:1;transition:all .12s}
+.cmp-dl-btn:hover{border-color:var(--accent);color:var(--accent)}
+
+/* compare map panes */
+.cmp-maps{display:flex;flex:1;min-width:0;flex-direction:column;overflow:hidden}
+.cmp-maps-row{display:flex;flex:1;min-height:0;overflow:hidden}
+.map-pane{flex:1;min-width:0;background:#080f16;position:relative;display:flex;flex-direction:column;overflow:hidden}
+.map-pane+.map-pane{border-left:1px solid var(--border)}
+.pane-header{display:flex;align-items:center;justify-content:space-between;padding:5px 8px;background:rgba(0,0,0,.55);flex-shrink:0;z-index:2}
+.pane-info{display:flex;align-items:center;gap:6px}
+.pane-step-lbl{font-family:var(--font-data);font-size:9px;color:rgba(255,255,255,.45)}
+.pane-img-wrap{flex:1;position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.pane-img{max-width:100%;max-height:100%;object-fit:contain;display:none;transition:opacity .18s}
+.pane-img.fading{opacity:.3}
+.pane-placeholder{display:flex;flex-direction:column;align-items:center;gap:8px;font-family:var(--font-data);font-size:12px;color:var(--muted)}
+.pane-spinner{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);display:none;z-index:10}
+.pane-spinner.show{display:block}
+.cmp-divider{width:3px;background:var(--accent);flex-shrink:0;position:relative;display:flex;align-items:center;justify-content:center;z-index:5;opacity:.7}
+.cmp-div-handle{width:20px;height:20px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:700}
+
+/* compare bottom bar */
+.cmp-bottom{height:36px;background:var(--card);border-top:1px solid var(--border);display:flex;align-items:center;padding:0 10px;gap:8px;flex-shrink:0}
+.cmp-bb-lbl{font-family:var(--font-data);font-size:9px;color:var(--dim);font-weight:700;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap}
+.cmp-slider{flex:1;max-width:220px;-webkit-appearance:none;appearance:none;height:4px;border-radius:4px;outline:none;cursor:pointer;background:linear-gradient(to right,var(--accent) 0%,var(--accent) var(--pct,0%),var(--dim) var(--pct,0%),var(--dim) 100%)}
+.cmp-slider::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;background:var(--accent);border:2px solid #fff;cursor:pointer}
+.cmp-slider::-moz-range-thumb{width:13px;height:13px;border-radius:50%;background:var(--accent);border:2px solid #fff}
+.cmp-step-display{font-family:var(--font-data);font-size:10px;font-weight:700;color:var(--accent);white-space:nowrap}
+.cmp-ctrl-btn{font-family:var(--font-data);font-size:10px;font-weight:700;padding:3px 9px;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;transition:all .12s}
+.cmp-ctrl-btn.playing{background:var(--accent);color:#fff;border-color:var(--accent)}
+
+/* ── MOBILE BOTTOM BAR (unchanged) ── */
+.mobile-bottom{display:none;flex-direction:column;background:var(--card);border-top:1px solid var(--border);flex-shrink:0}
+.mobile-tabs{display:flex;border-bottom:1px solid var(--border)}
+.mobile-tab{flex:1;padding:8px;font-size:11px;font-weight:700;font-family:var(--font-data);text-align:center;border:none;background:transparent;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;transition:all .12s}
+.mobile-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.mobile-panel{display:none;padding:10px 12px;max-height:45vh;overflow-y:auto}
+.mobile-panel.active{display:block}
+
+/* ── RESPONSIVE ── */
+@media(max-width:700px){
+  #rf-root{height:auto;overflow:visible}
+  .main-layout{flex-direction:column}
+  /* Hide desktop left panel */
+  .cmp-left{display:none}
+  /* Mobile collapsible panel */
+  .cmp-mobile-panel{display:flex;flex-direction:column;flex-shrink:0;background:var(--bg);border-bottom:1px solid var(--border)}
+  .cmp-mobile-toggle{display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;user-select:none;background:var(--card);border-bottom:1px solid transparent}
+  .cmp-mobile-toggle.open{border-bottom-color:var(--border)}
+  .cmp-mobile-toggle-label{font-family:var(--font-data);font-size:11px;font-weight:700;color:var(--text);flex:1}
+  .cmp-mobile-toggle-hint{font-family:var(--font-data);font-size:9px;color:var(--dim)}
+  .cmp-mobile-chevron{font-family:var(--font-data);font-size:12px;color:var(--muted);transition:transform .2s}
+  .cmp-mobile-chevron.open{transform:rotate(180deg)}
+  .cmp-mobile-body{display:none;padding:8px 10px;gap:8px;flex-direction:row;flex-wrap:wrap}
+  .cmp-mobile-body.open{display:flex}
+  .cmp-mobile-card{flex:1;min-width:140px;background:var(--card);border:1px solid var(--border);border-radius:7px;padding:7px 9px}
+  .cmp-mc-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:5px}
+  .cmp-mc-row{display:flex;justify-content:space-between;margin-bottom:2px}
+  .cmp-mc-k{font-family:var(--font-data);font-size:9px;color:var(--muted)}
+  .cmp-mc-v{font-family:var(--font-data);font-size:9px;color:var(--text);font-weight:600}
+  .cmp-mobile-export{width:100%;padding:0 10px 8px}
+  .cmp-mobile-export .cmp-dl-btn{width:100%;padding:7px;font-size:11px}
+  /* In compare mode on mobile, rf-root must scroll (stacked maps exceed viewport) */
+  #rf-root.cmp-mobile-active{height:auto;overflow-y:auto}
+  .right-panel{display:none}
+  .mobile-bottom{display:flex}
+  .ov-tl,.ov-tr{display:none}
+  .zoom-controls{bottom:8px;left:8px}
+  .zoom-btn{width:24px;height:24px;font-size:13px}
+  .topbar{gap:6px;padding:0 8px}
+  .run-time{display:none}
+  .author-bar{font-size:12px;padding:5px}
+  /* Compare mobile */
+  .compare-view{flex-direction:column;height:auto;overflow:visible}
+  .cmp-left{width:100%;border-right:none;border-bottom:1px solid var(--border);flex-direction:row;overflow-x:auto;flex-shrink:0;max-height:130px}
+  .cmp-sec{border-bottom:none;border-right:1px solid var(--border);flex-shrink:0;padding:7px 8px}
+  .pane-config{padding:6px}
+  .cmp-maps{flex:none;height:auto;overflow:visible}
+  .cmp-maps-row{flex-direction:column}
+  .map-pane{flex:none}
+  .map-pane+.map-pane{border-left:none;border-top:1px solid var(--border)}
+  /* Option B: image fills full width, height auto — no grey gaps */
+  .pane-img-wrap{display:block;height:auto}
+  .pane-img{width:100%;height:auto;max-width:100%;max-height:none;object-fit:fill;display:none}
+  .pane-placeholder{position:relative;padding:30px 0}
+  .cmp-divider{display:none}
+  .sync-badge,.run-time-cmp{display:none!important}
+  /* Bottom bar — prominent, full width, shows day+hour */
+  .cmp-bottom{padding:0 10px;gap:6px;height:auto;min-height:44px;flex-wrap:wrap;position:sticky;bottom:0;z-index:20;border-top:2px solid var(--accent)}
+  .cmp-bb-lbl{display:block;font-size:8px}
+  .cmp-slider{max-width:none;flex:1;min-width:120px}
+  .cmp-step-display{font-size:11px;font-weight:700;color:var(--accent);min-width:60px}
+  .cmp-ctrl-btn{padding:4px 10px;font-size:11px}
+  .compare-note{font-size:9px;padding:3px 8px}
+  .model-tab.cmp-tab{font-size:11px;padding:3px 8px}
+  /* Hide mobile bottom bar in compare mode (handled via JS rf-hide) */
+}
+@media(max-width:480px){
+  .topbar .sep{display:none}
+  .dd-label{display:none}
+}
+
+/* ── COMPARE STEP BAND ── */
+.cmp-band{
+  display:none;flex-shrink:0;
+  background:#111d2b;
+  border-bottom:2px solid var(--accent);
+  padding:8px 14px;
+  z-index:10;
+}
+.cmp-band.show{display:block}
+#rf-root.light-mode .cmp-band{background:var(--card)}
+.cmp-band-top{display:flex;align-items:center;gap:12px;margin-bottom:7px}
+.cmp-band-step{font-size:18px;font-weight:700;color:var(--text);min-width:60px;font-family:var(--font-data)}
+.cmp-band-info{display:flex;flex-direction:column;gap:1px}
+.cmp-band-day{font-size:12px;color:var(--muted);font-family:var(--font-data)}
+.cmp-band-valid{font-size:10px;color:var(--dim);font-family:var(--font-data)}
+.cmp-band-btns{display:flex;gap:5px;margin-left:auto}
+.cmp-band-btn{font-family:var(--font-data);font-size:11px;font-weight:700;padding:4px 12px;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;transition:all .12s}
+.cmp-band-btn:hover{border-color:var(--accent);color:var(--accent)}
+.cmp-band-btn.playing{background:var(--accent);color:#fff;border-color:var(--accent)}
+.cmp-band-segs{display:flex;gap:3px;overflow-x:auto;padding-bottom:2px}
+.cmp-band-segs::-webkit-scrollbar{height:3px}
+.cmp-band-segs::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.cmp-seg{flex-shrink:0;display:flex;flex-direction:column;align-items:center;padding:4px 7px;border-radius:5px;border:1px solid var(--border);background:var(--bg);cursor:pointer;min-width:44px;transition:all .1s;user-select:none}
+.cmp-seg:hover{border-color:var(--accent);background:var(--accent2)}
+.cmp-seg.active{background:var(--accent);border-color:var(--accent)}
+.cmp-seg.past{opacity:.4}
+.cmp-seg-h{font-family:var(--font-data);font-size:10px;font-weight:700;color:var(--muted);line-height:1.2}
+.cmp-seg-d{font-family:var(--font-data);font-size:8px;color:var(--dim)}
+.cmp-seg.active .cmp-seg-h,.cmp-seg.active .cmp-seg-d{color:#fff}
+.cmp-seg.active .cmp-seg-d{opacity:.7}
+/* On mobile — band is sticky so it follows scroll */
+@media(max-width:700px){
+  .cmp-band{position:sticky;top:0;z-index:50}
+  .cmp-band-step{font-size:15px}
+  .cmp-band-day{font-size:11px}
+  .cmp-band-valid{display:none}
+  .cmp-band-btn{font-size:10px;padding:3px 9px}
+  .cmp-seg{min-width:40px;padding:5px 6px}
+  .cmp-seg-h{font-size:10px}
+}
+</style>
+</head>
+<body>
+<div id="rf-root">
+
+<!-- AUTHOR BAR -->
+<div class="author-bar">
+  <b>Maps Generated by Ankit Patel (Gujarat Weatherman)</b>
+</div>
+
+<!-- TOPBAR -->
+<div class="topbar">
+  <div class="model-tabs">
+    <button class="model-tab active" id="tab-GFS" onclick="setModel('GFS',this)">GFS</button>
+    <button class="model-tab" id="tab-ECMWF" onclick="setModel('ECMWF',this)">ECMWF</button>
+    <button class="model-tab cmp-tab" id="tab-CMP" onclick="setCompareMode(this)">⊞ Compare</button>
+  </div>
+  <div class="sep"></div>
+  <!-- Single run time (normal mode) -->
+  <div class="run-time run-time-single" id="run-time-single">
+    <span class="run-time-header">Model Run</span>
+    <span class="rt-ist" id="rt-ist-en">Loading…</span>
+    <span class="rt-utc" id="rt-utc"></span>
+  </div>
+  <!-- Two run times (compare mode) -->
+  <div class="run-time-cmp" id="run-time-cmp">
+    <div class="run-time">
+      <span class="run-time-header">GFS Run</span>
+      <span class="rt-ist" id="rt-cmp-gfs">—</span>
+    </div>
+    <div class="run-time rt-ecmwf">
+      <span class="run-time-header">ECMWF Run</span>
+      <span class="rt-ist" id="rt-cmp-ecmwf">—</span>
+    </div>
+  </div>
+  <div class="sep"></div>
+  <div class="dd-wrap">
+    <span class="dd-label">Region</span>
+    <select class="dd" id="region-dd" onchange="setRegion(this.value)">
+      <option value="india">India</option>
+      <option value="gujarat_plain">Gujarat</option>
+    </select>
+  </div>
+  <div class="overlay-tabs-wrap" id="overlay-tabs-wrap">
+    <div class="overlay-tabs">
+      <button class="overlay-tab" onclick="setOverlay('gujarat_plain',this)">Plain</button>
+      <button class="overlay-tab active" onclick="setOverlay('gujarat_district',this)">Districts</button>
+    </div>
+  </div>
+  <div class="sync-badge" id="sync-badge">⇄ Steps synced</div>
+  <div class="spacer"></div>
+  <button class="theme-btn" id="theme-btn" onclick="toggleTheme()" title="Toggle light/dark mode">🌙</button>
+  <button class="lang-btn active" onclick="setLang('en',this)">EN</button>
+</div>
+
+<!-- COMPARE NOTE BANNER -->
+<div class="compare-note" id="compare-note">
+  <span>⊞ Compare mode — <b>GFS vs ECMWF side by side.</b> Switch to GFS or ECMWF tab to return to normal viewer.</span>
+</div>
+
+<!-- MOBILE COLLAPSIBLE PANEL — shown only on mobile in compare mode -->
+<div class="cmp-mobile-panel" id="cmp-mobile-panel" style="display:none">
+  <div class="cmp-mobile-toggle" id="cmp-mobile-toggle" onclick="toggleCmpMobilePanel()">
+    <span class="cmp-mobile-toggle-label">⊞ <span id="mob-panel-summary">GFS vs ECMWF</span></span>
+    <span class="cmp-mobile-toggle-hint" id="mob-panel-hint">tap to expand</span>
+    <span class="cmp-mobile-chevron" id="mob-panel-chev">▾</span>
+  </div>
+  <div class="cmp-mobile-body" id="cmp-mobile-body">
+    <div class="cmp-mobile-card">
+      <div class="cmp-mc-head"><span class="mb-gfs">GFS</span><span class="pc-res">0.25°</span></div>
+      <div class="cmp-mc-row"><span class="cmp-mc-k">Run</span><span class="cmp-mc-v" id="mob-gfs-run">—</span></div>
+      <div class="cmp-mc-row"><span class="cmp-mc-k">Region</span><span class="cmp-mc-v" id="mob-region-a">India</span></div>
+      <div class="cmp-mc-row"><span class="cmp-mc-k">Step</span><span class="cmp-mc-v" id="mob-step-a" style="color:var(--accent)">—</span></div>
+    </div>
+    <div class="cmp-mobile-card">
+      <div class="cmp-mc-head"><span class="mb-ecmwf">ECMWF</span><span class="pc-res">IFS 0.25°</span></div>
+      <div class="cmp-mc-row"><span class="cmp-mc-k">Run</span><span class="cmp-mc-v" id="mob-ecmwf-run">—</span></div>
+      <div class="cmp-mc-row"><span class="cmp-mc-k">Region</span><span class="cmp-mc-v" id="mob-region-b">India</span></div>
+      <div class="cmp-mc-row"><span class="cmp-mc-k">Step</span><span class="cmp-mc-v" style="color:var(--dim)">synced ⇄</span></div>
+    </div>
+    <div class="cmp-mobile-export">
+      <button class="cmp-dl-btn" onclick="downloadComparisonPNG()">⬇ Comparison PNG</button>
+    </div>
+  </div>
+</div>
+
+<!-- COMPARE STEP BAND — shown only in compare mode -->
+<div class="cmp-band" id="cmp-band">
+  <div class="cmp-band-top">
+    <div class="cmp-band-step" id="band-step">—</div>
+    <div class="cmp-band-info">
+      <span class="cmp-band-day" id="band-day">—</span>
+      <span class="cmp-band-valid" id="band-valid">—</span>
+    </div>
+    <div class="cmp-band-btns">
+      <button class="cmp-band-btn" onclick="cmpStep(-1)">◀</button>
+      <button class="cmp-band-btn" id="band-play" onclick="toggleCmpPlay()">▶ Play</button>
+      <button class="cmp-band-btn" onclick="cmpStep(1)">▶▶</button>
+    </div>
+  </div>
+  <div class="cmp-band-segs" id="cmp-band-segs"></div>
+</div>
+
+<!-- MAIN LAYOUT -->
+<div class="main-layout">
+
+  <!-- MAP AREA — direct child of main-layout (unchanged from original) -->
+  <div class="map-area" id="map-area">
+    <div class="placeholder" id="placeholder">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      <span>Loading forecast data…</span>
+    </div>
+    <img id="map-img" class="map-img" onload="onMapLoad()" onerror="onMapError()" alt="Rainfall forecast map">
+    <div class="ov-tl">
+      <div class="glass"><span class="dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);margin-right:4px;vertical-align:middle"></span><span id="ov-region-en" data-en>India Region</span></div>
+    </div>
+    <div class="ov-tr">
+      <div class="glass" id="ov-model">GFS 0.25°</div>
+      <div class="glass sm"><span data-en>Valid: </span><span id="ov-valid-en" data-en></span></div>
+    </div>
+    <div class="map-spinner" id="map-spinner"><div class="spinner"></div></div>
+    <div class="zoom-controls">
+      <button class="zoom-btn" onclick="zoomIn()" title="Zoom in">+</button>
+      <button class="zoom-btn" onclick="zoomReset()" title="Reset zoom" style="font-size:10px">⊙</button>
+      <button class="zoom-btn" onclick="zoomOut()" title="Zoom out">−</button>
+    </div>
+    <div class="gif-progress" id="gif-progress">
+      <div style="font-size:11px;font-weight:700">Generating GIF…</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:3px" id="gif-progress-text">Loading frames…</div>
+      <div class="gif-progress-bar"><div class="gif-progress-fill" id="gif-progress-fill"></div></div>
+    </div>
+  </div>
+
+  <!-- RIGHT PANEL — direct child of main-layout (unchanged from original) -->
+  <div class="right-panel" id="right-panel">
+    <div class="error-banner" id="error-banner"></div>
+    <div class="rp-sec">
+      <div class="rp-lbl">Forecast range</div>
+      <div class="fv-row">
+        <div class="fv-block"><span class="fv-lbl">From</span><span class="fv-val" id="fv-from-en" data-en></span></div>
+        <span class="fv-arrow">→</span>
+        <div class="fv-block"><span class="fv-lbl">To</span><span class="fv-val accent" id="fv-valid-en" data-en></span></div>
+      </div>
+    </div>
+    <div class="rp-sec">
+      <div class="rp-lbl">Slide <span id="slider-val" style="color:var(--accent);font-size:10px"></span></div>
+      <input type="range" class="fxx-slider" id="fxx-slider" min="0" max="0" value="0" oninput="onSlider(this.value)">
+      <div class="slider-ticks" id="slider-ticks"></div>
+    </div>
+    <div class="rp-sec">
+      <div class="rp-lbl">Forecast step <span style="color:var(--dim);font-size:8px">← → Space</span></div>
+      <div class="ctrl-row">
+        <button class="play-btn" id="play-btn" onclick="togglePlay()">▶ Play</button>
+        <button class="dl-btn" onclick="downloadPNG()">⬇ PNG</button>
+      </div>
+      <div style="margin-bottom:6px">
+        <div class="rp-lbl" style="margin-bottom:4px">GIF range</div>
+        <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">
+          <select class="dd" id="gif-range-dd" onchange="onGifRangeChange(this.value)" style="font-size:10px;padding:3px 6px;flex:1">
+            <option value="all">All steps</option>
+            <option value="5">First 5 days</option>
+            <option value="10">First 10 days</option>
+            <option value="15">First 15 days</option>
+            <option value="custom">Custom hours</option>
+          </select>
+          <button class="dl-btn" id="gif-btn" onclick="downloadGIF()" style="white-space:nowrap">⬇ GIF</button>
+        </div>
+        <div id="gif-custom-wrap" style="display:none;margin-top:5px">
+          <div style="display:flex;gap:5px;align-items:center">
+            <span style="font-size:10px;color:var(--dim)">From</span>
+            <input type="number" id="gif-from-h" placeholder="e.g. 24" min="0" step="24" style="width:70px;font-size:10px;padding:3px 5px;border-radius:5px;border:1px solid var(--border);background:var(--bg);color:var(--text)">
+            <span style="font-size:10px;color:var(--dim)">To</span>
+            <input type="number" id="gif-to-h" placeholder="e.g. 240" min="24" step="24" style="width:70px;font-size:10px;padding:3px 5px;border-radius:5px;border:1px solid var(--border);background:var(--bg);color:var(--text)">
+            <span style="font-size:10px;color:var(--dim)">h</span>
+          </div>
+        </div>
+      </div>
+      <div class="hour-grid" id="hour-grid"></div>
+    </div>
+    <div class="disc-header" onclick="toggleDisc()">
+      <span class="disc-title-lbl">Disclaimer</span>
+      <span class="disc-chevron" id="disc-chev">▾</span>
+    </div>
+    <div class="disc-body" id="disc-body">
+      <b>Data Attribution &amp; Disclaimer:</b> Forecast data are sourced from NOAA/NCEP GFS and ECMWF Open Data. All maps and graphics on this website are independently processed and generated by the author using these datasets. The content is provided for informational and educational purposes only and should not be considered an official weather forecast, warning, or advisory. For official forecasts and weather warnings in India, please refer to the <b>India Meteorological Department (IMD)</b>.
+    </div>
+    <div class="disc-footer">Maps generated by Ankit Patel · gujaratweatherman.com · Data: NOAA/NCEP (GFS), ECMWF Open Data</div>
+  </div><!-- /right-panel -->
+
+  <!-- COMPARE VIEW — sibling of map-area and right-panel inside main-layout -->
+  <div class="compare-view" id="compare-view">
+
+    <!-- Left config panel -->
+    <div class="cmp-left">
+      <div class="cmp-sec">
+        <div class="cmp-lbl">Left pane — GFS</div>
+        <div class="pane-config">
+          <div class="pc-head"><span class="mb-gfs">GFS</span><span class="pc-res">0.25°</span></div>
+          <div class="pc-row"><span class="pc-key">Run</span><span class="pc-val" id="cmp-gfs-run">—</span></div>
+          <div class="pc-row"><span class="pc-key">Region</span><span class="pc-val" id="cmp-region-a">India</span></div>
+          <div class="pc-step-row"><span class="pc-step-lbl">Step</span><span class="pc-step-val" id="cmp-step-a">—</span></div>
+        </div>
+      </div>
+      <div class="cmp-sec">
+        <div class="cmp-lbl">Right pane — ECMWF</div>
+        <div class="pane-config">
+          <div class="pc-head"><span class="mb-ecmwf">ECMWF</span><span class="pc-res">IFS 0.25°</span></div>
+          <div class="pc-row"><span class="pc-key">Run</span><span class="pc-val" id="cmp-ecmwf-run">—</span></div>
+          <div class="pc-row"><span class="pc-key">Region</span><span class="pc-val" id="cmp-region-b">India</span></div>
+          <div class="pc-step-row"><span class="pc-step-lbl">Step</span><span class="pc-step-synced">synced ⇄</span></div>
+        </div>
+      </div>
+      <div class="cmp-sec" style="margin-top:auto">
+        <div class="cmp-lbl">Export</div>
+        <div class="cmp-export">
+          <button class="cmp-dl-btn" id="cmp-dl-btn" onclick="downloadComparisonPNG()">⬇ Comparison PNG</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Map panes + bottom bar -->
+    <div class="cmp-maps">
+      <div class="cmp-maps-row">
+        <!-- Pane A: GFS -->
+        <div class="map-pane">
+          <div class="pane-header">
+            <div class="pane-info"><span class="mb-gfs">GFS</span><span class="pane-step-lbl" id="cmp-valid-a">—</span></div>
+          </div>
+          <div class="pane-img-wrap">
+            <div class="pane-placeholder" id="cmp-ph-a">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+              <span>Loading…</span>
+            </div>
+            <img id="cmp-img-a" class="pane-img" onload="onPaneLoad('a')" onerror="onPaneError('a')" alt="GFS">
+            <div class="ov-tl"><div class="glass" id="cmp-ov-region-a">India Region</div></div>
+            <div class="ov-tr"><div class="glass">GFS 0.25°</div><div class="glass sm" id="cmp-ov-valid-a"></div></div>
+            <div class="pane-spinner" id="cmp-spin-a"><div class="spinner"></div></div>
+          </div>
+        </div>
+        <!-- Divider -->
+        <div class="cmp-divider"><div class="cmp-div-handle">⇄</div></div>
+        <!-- Pane B: ECMWF -->
+        <div class="map-pane">
+          <div class="pane-header">
+            <div class="pane-info"><span class="mb-ecmwf">ECMWF</span><span class="pane-step-lbl" id="cmp-valid-b">—</span></div>
+          </div>
+          <div class="pane-img-wrap">
+            <div class="pane-placeholder" id="cmp-ph-b">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+              <span>Loading…</span>
+            </div>
+            <img id="cmp-img-b" class="pane-img" onload="onPaneLoad('b')" onerror="onPaneError('b')" alt="ECMWF">
+            <div class="ov-tl"><div class="glass" id="cmp-ov-region-b">India Region</div></div>
+            <div class="ov-tr"><div class="glass">ECMWF IFS 0.25°</div><div class="glass sm" id="cmp-ov-valid-b"></div></div>
+            <div class="pane-spinner" id="cmp-spin-b"><div class="spinner"></div></div>
+          </div>
+        </div>
+      </div>
+      <!-- Compare bottom bar -->
+      <div class="cmp-bottom">
+        <span class="cmp-bb-lbl">Step</span>
+        <input type="range" class="cmp-slider" id="cmp-slider" min="0" max="0" value="0" oninput="onCmpSlider(this.value)">
+        <span class="cmp-step-display" id="cmp-step-display">—</span>
+        <button class="cmp-ctrl-btn" onclick="cmpStep(-1)">◀</button>
+        <button class="cmp-ctrl-btn" id="cmp-play" onclick="toggleCmpPlay()">▶ Play</button>
+        <button class="cmp-ctrl-btn" onclick="cmpStep(1)">▶▶</button>
+        <div class="spacer"></div>
+        <span style="font-family:var(--font-data);font-size:9px;color:var(--dim)">← → keys work too</span>
+      </div>
+    </div>
+
+  </div><!-- /compare-view -->
+
+</div><!-- /main-layout -->
+
+<!-- MOBILE BOTTOM BAR (unchanged) -->
+<div class="mobile-bottom">
+  <div class="mobile-tabs">
+    <button class="mobile-tab active" onclick="showMobilePanel('steps',this)">Steps</button>
+    <button class="mobile-tab" onclick="showMobilePanel('info',this)">Info</button>
+    <button class="mobile-tab" onclick="showMobilePanel('download',this)">Download</button>
+  </div>
+  <div class="mobile-panel active" id="mp-steps">
+    <input type="range" class="fxx-slider" id="fxx-slider-m" min="0" max="0" value="0" oninput="onSlider(this.value)" style="width:100%;margin-bottom:6px">
+    <div style="display:flex;gap:5px;margin-bottom:7px">
+      <button class="play-btn" id="play-btn-m" onclick="togglePlay()" style="font-size:10px;padding:3px 8px">▶ Play</button>
+    </div>
+    <div class="hour-grid" id="hour-grid-m" style="grid-template-columns:repeat(4,1fr)"></div>
+  </div>
+  <div class="mobile-panel" id="mp-info">
+    <div class="rp-lbl" style="margin-bottom:4px">Model run</div>
+    <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:8px" id="m-run-time">—</div>
+    <div class="rp-lbl" style="margin-bottom:4px">Forecast range</div>
+    <div class="fv-row">
+      <div class="fv-block"><span class="fv-lbl">From</span><span class="fv-val" id="m-fv-from">—</span></div>
+      <span class="fv-arrow">→</span>
+      <div class="fv-block"><span class="fv-lbl">To</span><span class="fv-val accent" id="m-fv-valid">—</span></div>
+    </div>
+  </div>
+  <div class="mobile-panel" id="mp-download">
+    <div style="display:flex;gap:8px;margin-bottom:8px">
+      <button class="dl-btn" onclick="downloadPNG()" style="flex:1;padding:8px">⬇ PNG</button>
+      <button class="dl-btn" id="gif-btn-m" onclick="downloadGIF()" style="flex:1;padding:8px">⬇ GIF</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+      <span style="font-size:10px;color:var(--dim)">GIF range:</span>
+      <select class="dd" onchange="onGifRangeChange(this.value);document.getElementById('gif-range-dd').value=this.value" style="font-size:10px;padding:3px 6px;flex:1">
+        <option value="all">All steps</option>
+        <option value="5">First 5 days</option>
+        <option value="10">First 10 days</option>
+        <option value="15">First 15 days</option>
+        <option value="custom">Custom hours</option>
+      </select>
+    </div>
+    <div style="font-size:10px;color:var(--muted);line-height:1.6">Forecast data: NOAA/NCEP GFS &amp; ECMWF Open Data. Not official IMD bulletins.</div>
+  </div>
+</div>
+
+</div><!-- /#rf-root -->
+
+<script>
+// ── WordPress compat ──────────────────────────────────────────────────────────
+function rfRoot() { return document.getElementById('rf-root'); }
+
+// ── CONFIG ────────────────────────────────────────────────────────────────────
+const META_URL = 'https://gujaratweatherman-maps.gujratweatherman.workers.dev/latest/meta.json';
+const MAP_BASE = 'https://gujaratweatherman-maps.gujratweatherman.workers.dev/latest/';
+
+// ── COLOUR SCALE ──────────────────────────────────────────────────────────────
+const LEVELS = [0,5,10,15,20,25,30,40,50,60,70,80,90,100,125,150,175,200,250,300,400,500,600,700,800,900,1000];
+const COLORS = ['#ffffff','#e0f7fa','#80deea','#26c6da','#00acc1','#00c853',
+                '#2db400','#76d400','#c6ef00','#f0e800','#f5c200','#e88000',
+                '#c85a00','#8b3200','#6b0000','#3b0000','#1a0030','#4a0080',
+                '#6a00aa','#cc00cc','#e8008a','#e060b0','#f0a0d0','#ffd0e8',
+                '#cccccc','#888888','#444444'];
+
+// ── HELPERS ───────────────────────────────────────────────────────────────────
+const MON_FULL = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const DAY_EN   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+function fmtIst(utcStr) {
+  const d = new Date(utcStr.replace(' UTC','Z'));
+  const ist = new Date(d.getTime() + 5.5*3600000);
+  const h = ist.getUTCHours(), m = ist.getUTCMinutes();
+  const h12 = h%12||12, ampm = h>=12?'pm':'am';
+  const ms = m>0?':'+String(m).padStart(2,'0'):'';
+  return `${DAY_EN[ist.getUTCDay()]} ${ist.getUTCDate()} ${MON_FULL[ist.getUTCMonth()]} ${ist.getUTCFullYear()}, ${h12}${ms}${ampm} IST`;
+}
+
+// FIX: correctly shows UTC run hour + IST date
+function fmtIstShort(utcStr) {
+  const d = new Date(utcStr.replace(' UTC','Z'));
+  const utcH = d.getUTCHours();
+  const ist = new Date(d.getTime() + 5.5*3600000);
+  const istH = ist.getUTCHours(), istM = ist.getUTCMinutes();
+  const h12 = istH%12||12, ampm = istH>=12?'pm':'am';
+  const ms = istM>0?':'+String(istM).padStart(2,'0'):'';
+  return `${String(utcH).padStart(2,'0')}z ${ist.getUTCDate()} ${MON_FULL[ist.getUTCMonth()].slice(0,3)} ${ist.getUTCFullYear()}, ${h12}${ms}${ampm} IST`;
+}
+
+// ── STATE ─────────────────────────────────────────────────────────────────────
+let META=null, MODEL='GFS', STEPS=[], activeIdx=-1, CACHE_VER='';
+let region='india', overlay='gujarat_district';
+let lang='en', playing=false, playTimer=null;
+// Compare state
+let compareMode=false, CMP_STEPS_GFS=[], CMP_STEPS_ECMWF=[], CMP_STEPS_COMMON=[], cmpActiveIdx=0;
+let cmpPlaying=false, cmpPlayTimer=null;
+
+// ── BOOT ──────────────────────────────────────────────────────────────────────
+initTheme();
+loadMeta();
+
+async function loadMeta() {
+  try {
+    const r = await fetch(META_URL + '?t=' + Date.now());
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    META = await r.json();
+    onMetaLoaded();
+  } catch(e) {
+    showError('Could not load forecast data: ' + e.message);
+  }
+}
+
+function onMetaLoaded() {
+  ['GFS','ECMWF'].forEach(m => {
+    const btn = document.getElementById('tab-' + m);
+    if (META.models && META.models[m]) { btn.disabled=false; btn.title=''; }
+    else { btn.disabled=true; btn.title=m+' not available'; }
+  });
+  // Disable compare tab if either model missing
+  const cmpBtn = document.getElementById('tab-CMP');
+  const bothAvail = META.models && META.models.GFS && META.models.ECMWF;
+  cmpBtn.disabled = !bothAvail;
+  if (!bothAvail) cmpBtn.title = 'Both GFS and ECMWF required';
+
+  CACHE_VER = META.cache_version || '';
+  if (!META.models[MODEL]) {
+    MODEL = Object.keys(META.models)[0];
+    document.querySelectorAll('.model-tab:not(.cmp-tab)').forEach(t => t.classList.remove('active'));
+    document.getElementById('tab-' + MODEL).classList.add('active');
+  }
+  applyModelMeta();
+  buildSteps();
+  selectStep(0);
+  buildCmpSteps();
+}
+
+function applyModelMeta() {
+  if (!META?.models[MODEL]) return;
+  const m = META.models[MODEL];
+  const ist = fmtIst(m.run_time_utc);
+  document.getElementById('rt-ist-en').textContent = ist;
+  document.getElementById('rt-utc').textContent = m.run_time_utc;
+  document.getElementById('m-run-time').textContent = ist;
+  document.getElementById('fv-from-en').textContent = ist;
+  document.getElementById('m-fv-from').textContent = ist;
+  document.getElementById('ov-model').textContent = MODEL + (MODEL==='ECMWF' ? ' IFS 0.25°' : ' 0.25°');
+}
+
+function buildSteps() {
+  if (!META?.models[MODEL]) return;
+  STEPS = META.models[MODEL].steps
+    .filter(s => s.is_day_milestone && s.forecast_hour > 0)
+    .map(s => ({fxx: s.forecast_hour, dayLabel: s.day_label || 'Day '+s.day_number, validUtc: s.valid_time_utc}));
+  buildSlider();
+  buildHourGrid();
+}
+
+// ── COMPARE STEPS ─────────────────────────────────────────────────────────────
+function buildCmpSteps() {
+  if (!META?.models?.GFS || !META?.models?.ECMWF) return;
+  CMP_STEPS_GFS = META.models.GFS.steps
+    .filter(s => s.is_day_milestone && s.forecast_hour > 0)
+    .map(s => ({fxx: s.forecast_hour, dayLabel: s.day_label||'Day '+s.day_number, validUtc: s.valid_time_utc}));
+  CMP_STEPS_ECMWF = META.models.ECMWF.steps
+    .filter(s => s.is_day_milestone && s.forecast_hour > 0)
+    .map(s => ({fxx: s.forecast_hour, dayLabel: s.day_label||'Day '+s.day_number, validUtc: s.valid_time_utc}));
+  // Only steps both models share — avoids GFS-only 384h failing on ECMWF
+  const ecmwfFxx = new Set(CMP_STEPS_ECMWF.map(s => s.fxx));
+  CMP_STEPS_COMMON = CMP_STEPS_GFS.filter(s => ecmwfFxx.has(s.fxx));
+  const sl = document.getElementById('cmp-slider');
+  sl.min=0; sl.max=CMP_STEPS_COMMON.length-1; sl.value=0;
+  // Build segmented step blocks
+  const segs=document.getElementById('cmp-band-segs');
+  if(segs){
+    segs.innerHTML='';
+    CMP_STEPS_COMMON.forEach((s,i)=>{
+      const el=document.createElement('div');
+      el.className='cmp-seg'; el.dataset.idx=i;
+      el.innerHTML=`<span class="cmp-seg-h">${s.fxx}h</span><span class="cmp-seg-d">D${i+1}</span>`;
+      el.onclick=()=>selectCmpStep(i);
+      segs.appendChild(el);
+    });
+  }
+  // Left panel run times
+  document.getElementById('cmp-gfs-run').textContent   = fmtIstShort(META.models.GFS.run_time_utc);
+  document.getElementById('mob-gfs-run').textContent   = fmtIstShort(META.models.GFS.run_time_utc);
+  document.getElementById('mob-ecmwf-run').textContent = fmtIstShort(META.models.ECMWF.run_time_utc);
+  document.getElementById('cmp-ecmwf-run').textContent = fmtIstShort(META.models.ECMWF.run_time_utc);
+  document.getElementById('rt-cmp-gfs').textContent    = fmtIstShort(META.models.GFS.run_time_utc);
+  document.getElementById('rt-cmp-ecmwf').textContent  = fmtIstShort(META.models.ECMWF.run_time_utc);
+}
+
+// ── MOBILE COMPARE PANEL TOGGLE ─────────────────────────────────────────────────
+function toggleCmpMobilePanel() {
+  const body   = document.getElementById('cmp-mobile-body');
+  const toggle = document.getElementById('cmp-mobile-toggle');
+  const chev   = document.getElementById('mob-panel-chev');
+  const hint   = document.getElementById('mob-panel-hint');
+  const isOpen = body.classList.toggle('open');
+  toggle.classList.toggle('open', isOpen);
+  chev.classList.toggle('open', isOpen);
+  hint.textContent = isOpen ? 'tap to collapse' : 'tap to expand';
+}
+
+// ── COMPARE MODE TOGGLE ───────────────────────────────────────────────────────
+function setCompareMode(el) {
+  stopPlay();
+  compareMode = true;
+  document.querySelectorAll('.model-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  // Hide normal view elements using rf-hide — no wrapper needed
+  document.getElementById('map-area').classList.add('rf-hide');
+  document.getElementById('right-panel').classList.add('rf-hide');
+  document.querySelector('.mobile-bottom').classList.add('rf-hide');
+  rfRoot().classList.add('cmp-mobile-active');
+  // Show compare view
+  document.getElementById('compare-view').classList.add('show');
+  document.getElementById('compare-note').classList.add('show');
+  document.getElementById('cmp-band').classList.add('show');
+  if(window.innerWidth<=700) document.getElementById('cmp-mobile-panel').style.display='flex';
+  document.getElementById('run-time-single').classList.add('hide');
+  document.getElementById('run-time-cmp').classList.add('show');
+  document.getElementById('sync-badge').classList.add('show');
+  document.getElementById('overlay-tabs-wrap').style.display = 'none';
+  updateCmpRegionLabels();
+  if (CMP_STEPS_COMMON.length) selectCmpStep(0);
+}
+
+function exitCompareMode() {
+  compareMode = false;
+  stopCmpPlay();
+  // Restore normal view
+  document.getElementById('map-area').classList.remove('rf-hide');
+  document.getElementById('right-panel').classList.remove('rf-hide');
+  document.querySelector('.mobile-bottom').classList.remove('rf-hide');
+  rfRoot().classList.remove('cmp-mobile-active');
+  document.getElementById('compare-view').classList.remove('show');
+  document.getElementById('compare-note').classList.remove('show');
+  document.getElementById('cmp-band').classList.remove('show');
+  document.getElementById('cmp-mobile-panel').style.display='none';
+  document.getElementById('run-time-single').classList.remove('hide');
+  document.getElementById('run-time-cmp').classList.remove('show');
+  document.getElementById('sync-badge').classList.remove('show');
+}
+
+// ── COMPARE STEP SELECTION ────────────────────────────────────────────────────
+function selectCmpStep(idx) {
+  if (!CMP_STEPS_COMMON.length) return;
+  idx = Math.max(0, Math.min(idx, CMP_STEPS_COMMON.length-1));
+  cmpActiveIdx = idx;
+  const sGFS = CMP_STEPS_COMMON[idx];
+  const sECMWF = CMP_STEPS_ECMWF.find(s => s.fxx === sGFS.fxx);
+  // Slider
+  const sl = document.getElementById('cmp-slider');
+  sl.value = idx;
+  const pct = CMP_STEPS_COMMON.length>1 ? idx/(CMP_STEPS_COMMON.length-1)*100 : 0;
+  sl.style.setProperty('--pct', pct+'%');
+  // Labels
+  document.getElementById('cmp-step-display').textContent = sGFS.fxx+'h · '+sGFS.dayLabel;
+  // Update band info
+  document.getElementById('band-step').textContent = sGFS.fxx+'h';
+  document.getElementById('band-day').textContent = sGFS.dayLabel;
+  document.getElementById('band-valid').textContent = 'Valid: '+fmtIst(sGFS.validUtc);
+  // Mobile panel
+  document.getElementById('mob-step-a').textContent = sGFS.fxx+'h';
+  document.getElementById('mob-panel-summary').textContent = 'GFS vs ECMWF · '+sGFS.fxx+'h · '+sGFS.dayLabel;
+  // Update segmented blocks — active + past states
+  document.querySelectorAll('.cmp-seg').forEach((el,i)=>{
+    el.classList.remove('active','past');
+    if(i===idx) el.classList.add('active');
+    else if(i<idx) el.classList.add('past');
+  });
+  // Scroll active segment into view
+  const activeSeg=document.querySelector('.cmp-seg.active');
+  if(activeSeg) activeSeg.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'});
+  document.getElementById('cmp-step-a').textContent = sGFS.fxx+'h';
+  const validA = fmtIst(sGFS.validUtc);
+  const validB = sECMWF ? fmtIst(sECMWF.validUtc) : validA;
+  document.getElementById('cmp-valid-a').textContent = sGFS.fxx+'h · '+validA;
+  document.getElementById('cmp-valid-b').textContent = sGFS.fxx+'h · '+validB;
+  document.getElementById('cmp-ov-valid-a').textContent = 'Valid: '+validA;
+  document.getElementById('cmp-ov-valid-b').textContent = 'Valid: '+validB;
+  // Load images
+  loadCmpMap('a', 'GFS', sGFS.fxx);
+  loadCmpMap('b', 'ECMWF', sECMWF ? sECMWF.fxx : sGFS.fxx);
+}
+
+function cmpMapUrl(model, fxx) {
+  const fstr = String(fxx).padStart(3,'0');
+  const key = region==='india' ? 'india' : overlay;
+  const base = MAP_BASE + model + '/' + key + '_fxx' + fstr + '.png';
+  return CACHE_VER ? base+'?v='+CACHE_VER : base;
+}
+
+// FIX: reset src properly so onload fires reliably on every step change
+function loadCmpMap(pane, model, fxx) {
+  const img  = document.getElementById('cmp-img-'+pane);
+  const spin = document.getElementById('cmp-spin-'+pane);
+  const ph   = document.getElementById('cmp-ph-'+pane);
+  img.style.display = 'none';
+  img.classList.remove('fading');
+  ph.style.display = 'flex';
+  spin.classList.add('show');
+  img.src = '';
+  img.src = cmpMapUrl(model, fxx);
+}
+
+function onPaneLoad(pane) {
+  const img  = document.getElementById('cmp-img-'+pane);
+  const ph   = document.getElementById('cmp-ph-'+pane);
+  const spin = document.getElementById('cmp-spin-'+pane);
+  img.style.display = 'block';
+  ph.style.display  = 'none';
+  spin.classList.remove('show');
+}
+
+function onPaneError(pane) {
+  const img  = document.getElementById('cmp-img-'+pane);
+  const ph   = document.getElementById('cmp-ph-'+pane);
+  const spin = document.getElementById('cmp-spin-'+pane);
+  img.style.display = 'none';
+  ph.innerHTML = '<span style="font-size:11px;color:var(--muted)">Map not available</span>';
+  ph.style.display = 'flex';
+  spin.classList.remove('show');
+}
+
+function onCmpSlider(val) { const idx=parseInt(val); if(idx!==cmpActiveIdx) selectCmpStep(idx); }
+function cmpStep(dir) { selectCmpStep(cmpActiveIdx+dir); }
+
+function toggleCmpPlay() {
+  if (cmpPlaying) { stopCmpPlay(); return; }
+  if (cmpActiveIdx >= CMP_STEPS_COMMON.length-1) selectCmpStep(0);
+  cmpPlaying = true;
+  const btn = document.getElementById('cmp-play');
+  btn.classList.add('playing'); btn.textContent='⏸ Pause';
+  const bandPlay = document.getElementById('band-play');
+  if(bandPlay){ bandPlay.classList.add('playing'); bandPlay.textContent='⏸ Pause'; }
+  cmpPlayTimer = setInterval(() => {
+    if (cmpActiveIdx >= CMP_STEPS_COMMON.length-1) { stopCmpPlay(); return; }
+    selectCmpStep(cmpActiveIdx+1);
+  }, 900);
+}
+
+function stopCmpPlay() {
+  clearInterval(cmpPlayTimer); cmpPlaying=false;
+  const btn=document.getElementById('cmp-play');
+  if (btn) { btn.classList.remove('playing'); btn.textContent='▶ Play'; }
+  const bandPlay2 = document.getElementById('band-play');
+  if(bandPlay2){ bandPlay2.classList.remove('playing'); bandPlay2.textContent='▶ Play'; }
+}
+
+function updateCmpRegionLabels() {
+  const labels = {india:'India Region',gujarat_plain:'Gujarat — Plain',gujarat_district:'Gujarat — Districts'};
+  const lbl = labels[region==='india'?'india':overlay] || 'India Region';
+  document.getElementById('cmp-ov-region-a').textContent = lbl;
+  document.getElementById('cmp-ov-region-b').textContent = lbl;
+  document.getElementById('cmp-region-a').textContent = lbl.replace(' Region','').replace(' — ',' ');
+  document.getElementById('cmp-region-b').textContent = lbl.replace(' Region','').replace(' — ',' ');
+  document.getElementById('mob-region-a').textContent = lbl.replace(' Region','').replace(' — ',' ');
+  document.getElementById('mob-region-b').textContent = lbl.replace(' Region','').replace(' — ',' ');
+}
+
+// ── COMPARE DOWNLOAD ──────────────────────────────────────────────────────────
+async function downloadComparisonPNG() {
+  const imgA=document.getElementById('cmp-img-a'), imgB=document.getElementById('cmp-img-b');
+  if (imgA.style.display==='none'||imgB.style.display==='none') { alert('Both maps must be loaded first.'); return; }
+  const btn=document.getElementById('cmp-dl-btn');
+  btn.textContent='⏳ Generating…'; btn.disabled=true;
+  try {
+    const [elA,elB] = await Promise.all([loadImage(imgA.src), loadImage(imgB.src)]);
+    const GAP=6, LABEL_H=48;
+    const W=elA.naturalWidth+elB.naturalWidth+GAP, H=Math.max(elA.naturalHeight,elB.naturalHeight)+LABEL_H;
+    const canvas=document.createElement('canvas'); canvas.width=W; canvas.height=H;
+    const ctx=canvas.getContext('2d');
+    ctx.fillStyle='#0d1825'; ctx.fillRect(0,0,W,H);
+    ctx.drawImage(elA,0,LABEL_H); ctx.drawImage(elB,elA.naturalWidth+GAP,LABEL_H);
+    ctx.fillStyle='#2f6fed'; ctx.fillRect(elA.naturalWidth,0,GAP,H);
+    ctx.fillStyle='#111d2b'; ctx.fillRect(0,0,W,LABEL_H);
+    ctx.textBaseline='middle';
+    ctx.font='bold 18px Arial,sans-serif'; ctx.fillStyle='#7aabff'; ctx.fillText('GFS 0.25°',16,LABEL_H/2-7);
+    ctx.font='13px Arial,sans-serif'; ctx.fillStyle='#3a5068';
+    const fxx=CMP_STEPS_COMMON[cmpActiveIdx]?.fxx||'';
+    ctx.fillText(fxx+'h · '+(document.getElementById('cmp-valid-a').textContent||''),16,LABEL_H/2+12);
+    const rx=elA.naturalWidth+GAP+16;
+    ctx.font='bold 18px Arial,sans-serif'; ctx.fillStyle='#4dd4a0'; ctx.fillText('ECMWF IFS 0.25°',rx,LABEL_H/2-7);
+    ctx.font='13px Arial,sans-serif'; ctx.fillStyle='#3a5068';
+    ctx.fillText(fxx+'h · '+(document.getElementById('cmp-valid-b').textContent||''),rx,LABEL_H/2+12);
+    ctx.fillStyle='rgba(255,255,255,.2)'; ctx.font='11px Arial,sans-serif'; ctx.textAlign='center';
+    ctx.fillText('gujaratweatherman.com · GFS vs ECMWF',W/2,H-8);
+    canvas.toBlob(blob=>{
+      const url=URL.createObjectURL(blob); const a=document.createElement('a');
+      a.href=url; a.download=`GFS_vs_ECMWF_${region}_fxx${String(fxx).padStart(3,'0')}_comparison.png`;
+      a.click(); URL.revokeObjectURL(url);
+    },'image/png');
+  } catch(e) { alert('Could not generate PNG: '+e.message); }
+  finally { btn.textContent='⬇ Comparison PNG'; btn.disabled=false; }
+}
+
+// ── SLIDER (normal) ───────────────────────────────────────────────────────────
+function buildSlider() {
+  ['fxx-slider','fxx-slider-m'].forEach(id => {
+    const el=document.getElementById(id);
+    if (el) { el.min=0; el.max=STEPS.length-1; el.value=0; }
+  });
+  const t=document.getElementById('slider-ticks');
+  if (t) {
+    t.innerHTML='';
+    STEPS.forEach((s,i) => {
+      const sp=document.createElement('span'); sp.className='stk'; sp.dataset.idx=i; sp.textContent=s.fxx+'h'; t.appendChild(sp);
+    });
+  }
+  updateSlider(0);
+}
+
+function updateSlider(idx) {
+  if (!STEPS.length) return;
+  ['fxx-slider','fxx-slider-m'].forEach(id => {
+    const el=document.getElementById(id);
+    if (el) { el.value=idx; const pct=STEPS.length>1?idx/(STEPS.length-1)*100:0; el.style.setProperty('--pct',pct+'%'); }
+  });
+  const sv=document.getElementById('slider-val'); if(sv) sv.textContent=STEPS[idx].fxx+'h';
+  document.querySelectorAll('.stk').forEach(t=>t.classList.toggle('active',+t.dataset.idx===idx));
+}
+
+function onSlider(val) { const idx=parseInt(val); if(idx!==activeIdx) selectStep(idx); }
+
+// ── HOUR GRID ─────────────────────────────────────────────────────────────────
+function buildHourGrid() {
+  ['hour-grid','hour-grid-m'].forEach(id => {
+    const g=document.getElementById(id); if(!g) return; g.innerHTML='';
+    STEPS.forEach((s,idx) => {
+      const b=document.createElement('button'); b.className='hbox'; b.dataset.idx=idx;
+      b.onclick=()=>selectStep(idx);
+      b.innerHTML=`<span class="hbox-main">${s.fxx}h</span><span class="hbox-sub">${s.dayLabel}</span>`;
+      g.appendChild(b);
+    });
+  });
+}
+
+// ── STEP SELECTION ────────────────────────────────────────────────────────────
+function selectStep(idx) {
+  if (!STEPS.length) return;
+  activeIdx=idx; const s=STEPS[idx];
+  document.querySelectorAll('.hbox').forEach(b=>b.classList.toggle('active',+b.dataset.idx===idx));
+  const active=document.querySelector('#hour-grid .hbox.active');
+  if(active) active.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'});
+  updateSlider(idx);
+  const ist=fmtIst(s.validUtc);
+  document.getElementById('fv-valid-en').textContent=ist;
+  document.getElementById('ov-valid-en').textContent='Valid: '+ist;
+  document.getElementById('m-fv-valid').textContent=ist;
+  loadMap(s.fxx);
+}
+
+// ── MAP (normal) ──────────────────────────────────────────────────────────────
+function mapUrl(fxx) {
+  const fstr=String(fxx).padStart(3,'0');
+  const key=region==='india'?'india':overlay;
+  const base=MAP_BASE+MODEL+'/'+key+'_fxx'+fstr+'.png';
+  return CACHE_VER ? base+'?v='+CACHE_VER : base;
+}
+
+function loadMap(fxx) {
+  const img=document.getElementById('map-img');
+  img.classList.add('fading');
+  document.getElementById('map-spinner').classList.add('show');
+  img.src=mapUrl(fxx);
+}
+
+function onMapLoad() {
+  const img=document.getElementById('map-img');
+  img.classList.remove('fading'); img.style.display='block';
+  document.getElementById('placeholder').style.display='none';
+  document.getElementById('map-spinner').classList.remove('show');
+  hideError();
+}
+
+function onMapError() {
+  document.getElementById('map-img').style.display='none';
+  document.getElementById('placeholder').style.display='flex';
+  document.getElementById('map-spinner').classList.remove('show');
+  showError('Map not found: '+document.getElementById('map-img').src);
+}
+
+// ── MODEL ─────────────────────────────────────────────────────────────────────
+function setModel(model, el) {
+  if (!META?.models[model]) return;
+  exitCompareMode();
+  MODEL=model;
+  document.querySelectorAll('.model-tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  const isGuj=region!=='india';
+  document.getElementById('overlay-tabs-wrap').style.display=isGuj?'flex':'none';
+  applyModelMeta(); buildSteps();
+  if(activeIdx>=0) selectStep(Math.min(activeIdx,STEPS.length-1));
+  else selectStep(0);
+}
+
+// ── REGION ────────────────────────────────────────────────────────────────────
+function setRegion(val, fromDropdown=true) {
+  region=val; const isGuj=val!=='india';
+  if(!compareMode) document.getElementById('overlay-tabs-wrap').style.display=isGuj?'flex':'none';
+  if(isGuj&&fromDropdown){
+    overlay='gujarat_district';
+    document.querySelectorAll('.overlay-tab').forEach(t=>t.classList.remove('active'));
+    const d=document.querySelectorAll('.overlay-tab')[1]; if(d) d.classList.add('active');
+  }
+  const labels={india:'India Region',gujarat_plain:'Gujarat — Plain',gujarat_district:'Gujarat — Districts'};
+  document.getElementById('ov-region-en').textContent=labels[isGuj?overlay:'india']||'India Region';
+  if(compareMode){ updateCmpRegionLabels(); if(CMP_STEPS_COMMON.length) selectCmpStep(cmpActiveIdx); }
+  else if(activeIdx>=0) loadMap(STEPS[activeIdx].fxx);
+}
+
+function setOverlay(variant, el) {
+  overlay=variant;
+  document.querySelectorAll('.overlay-tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active'); setRegion(region,false);
+}
+
+// ── PLAYBACK ──────────────────────────────────────────────────────────────────
+function togglePlay() {
+  if(playing){stopPlay();return;}
+  if(activeIdx>=STEPS.length-1) selectStep(0);
+  playing=true;
+  ['play-btn','play-btn-m'].forEach(id=>{const b=document.getElementById(id);if(b){b.classList.add('playing');b.textContent='⏸ Pause';}});
+  playTimer=setInterval(()=>{if(activeIdx>=STEPS.length-1){stopPlay();return;}selectStep(activeIdx+1);},900);
+}
+function stopPlay() {
+  clearInterval(playTimer); playing=false;
+  ['play-btn','play-btn-m'].forEach(id=>{const b=document.getElementById(id);if(b){b.classList.remove('playing');b.textContent='▶ Play';}});
+}
+
+// ── LANGUAGE ──────────────────────────────────────────────────────────────────
+function setLang(l, el) {
+  lang=l; document.querySelectorAll('.lang-btn').forEach(b=>b.classList.remove('active'));
+  el.classList.add('active'); rfRoot().classList.toggle('lang-gu',l==='gu');
+}
+
+// ── THEME ─────────────────────────────────────────────────────────────────────
+function initTheme() {
+  const saved=localStorage.getItem('gwm-rf-theme');
+  const prefersDark=window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const isDark=saved?saved==='dark':prefersDark;
+  if(!isDark){rfRoot().classList.add('light-mode');document.getElementById('theme-btn').textContent='☀️';}
+}
+function toggleTheme() {
+  const isLight=rfRoot().classList.toggle('light-mode');
+  document.getElementById('theme-btn').textContent=isLight?'☀️':'🌙';
+  localStorage.setItem('gwm-rf-theme',isLight?'light':'dark');
+}
+
+// ── DISCLAIMER ────────────────────────────────────────────────────────────────
+function toggleDisc() {
+  document.getElementById('disc-body').classList.toggle('open');
+  document.getElementById('disc-chev').classList.toggle('open');
+}
+
+// ── MOBILE PANELS ─────────────────────────────────────────────────────────────
+function showMobilePanel(name, el) {
+  document.querySelectorAll('.mobile-tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.mobile-panel').forEach(p=>p.classList.remove('active'));
+  el.classList.add('active'); document.getElementById('mp-'+name).classList.add('active');
+}
+
+// ── ZOOM + PAN ────────────────────────────────────────────────────────────────
+let zoomLevel=1,panX=0,panY=0,isDragging=false,dragStartX=0,dragStartY=0,dragStartPanX=0,dragStartPanY=0;
+function applyZoom() {
+  const img=document.getElementById('map-img');
+  if(zoomLevel<=1){panX=0;panY=0;}
+  img.style.transform=`scale(${zoomLevel}) translate(${panX}px,${panY}px)`;
+  img.style.transformOrigin='center center';
+  img.style.maxWidth=zoomLevel<=1?'100%':'none';
+  img.style.maxHeight=zoomLevel<=1?'100%':'none';
+  img.style.cursor=zoomLevel>1?'grab':'default';
+}
+function zoomIn(){zoomLevel=Math.min(4,zoomLevel+0.25);applyZoom();}
+function zoomOut(){zoomLevel=Math.max(0.5,zoomLevel-0.25);applyZoom();}
+function zoomReset(){zoomLevel=1;panX=0;panY=0;applyZoom();}
+(function initPan(){
+  const area=document.getElementById('map-area');
+  area.addEventListener('mousedown',e=>{if(zoomLevel<=1)return;isDragging=true;dragStartX=e.clientX;dragStartY=e.clientY;dragStartPanX=panX;dragStartPanY=panY;document.getElementById('map-img').style.cursor='grabbing';e.preventDefault();});
+  window.addEventListener('mousemove',e=>{if(!isDragging)return;panX=dragStartPanX+(e.clientX-dragStartX)/zoomLevel;panY=dragStartPanY+(e.clientY-dragStartY)/zoomLevel;applyZoom();});
+  window.addEventListener('mouseup',()=>{if(isDragging){isDragging=false;document.getElementById('map-img').style.cursor=zoomLevel>1?'grab':'default';}});
+  let touchStartX=0,touchStartY=0;
+  area.addEventListener('touchstart',e=>{if(zoomLevel<=1||e.touches.length!==1)return;touchStartX=e.touches[0].clientX;touchStartY=e.touches[0].clientY;dragStartPanX=panX;dragStartPanY=panY;},{passive:true});
+  area.addEventListener('touchmove',e=>{if(zoomLevel<=1||e.touches.length!==1)return;panX=dragStartPanX+(e.touches[0].clientX-touchStartX)/zoomLevel;panY=dragStartPanY+(e.touches[0].clientY-touchStartY)/zoomLevel;applyZoom();e.preventDefault();},{passive:false});
+})();
+
+// ── DOWNLOAD PNG ──────────────────────────────────────────────────────────────
+function downloadPNG() {
+  const img=document.getElementById('map-img');
+  if(!img.src||img.style.display==='none')return;
+  const a=document.createElement('a'); a.href=img.src;
+  const fxx=STEPS[activeIdx]?String(STEPS[activeIdx].fxx).padStart(3,'0'):'000';
+  a.download=`${MODEL}_${region}_fxx${fxx}.png`; a.click();
+}
+
+// ── GIF ───────────────────────────────────────────────────────────────────────
+function onGifRangeChange(val){const wrap=document.getElementById('gif-custom-wrap');if(wrap)wrap.style.display=val==='custom'?'block':'none';}
+function getGifSteps(){
+  const dd=document.getElementById('gif-range-dd'),val=dd?dd.value:'all';
+  if(val==='all')return STEPS;
+  if(val==='custom'){const fromH=parseInt(document.getElementById('gif-from-h').value)||0,toH=parseInt(document.getElementById('gif-to-h').value)||999999;return STEPS.filter(s=>s.fxx>=fromH&&s.fxx<=toH);}
+  return STEPS.filter(s=>s.fxx<=parseInt(val)*24);
+}
+
+async function downloadGIF() {
+  const gifSteps=getGifSteps(); if(!gifSteps.length){alert('No steps in selected range.');return;}
+  const btn=document.getElementById('gif-btn'),btnM=document.getElementById('gif-btn-m');
+  const progress=document.getElementById('gif-progress'),pText=document.getElementById('gif-progress-text'),pFill=document.getElementById('gif-progress-fill');
+  if(btn){btn.textContent='⏳ GIF';btn.disabled=true;}
+  progress.classList.add('show');
+  try {
+    await loadScript('https://cdn.jsdelivr.net/npm/gif.js@0.2.0/dist/gif.js');
+    let workerUrl='https://cdn.jsdelivr.net/npm/gif.js@0.2.0/dist/gif.worker.js';
+    try{const r=await fetch(workerUrl);const b=await r.blob();workerUrl=URL.createObjectURL(b);}catch(e){console.warn('Worker blob failed:',e);}
+    const gif=new GIF({workers:2,quality:8,width:0,height:0,workerScript:workerUrl});
+    const total=gifSteps.length;let firstW=0,firstH=0;
+    for(let i=0;i<total;i++){
+      const s=gifSteps[i];pText.textContent=`Loading frame ${i+1} of ${total} (${s.fxx}h)…`;pFill.style.width=(i/total*60)+'%';
+      try{const imgEl=await loadImage(mapUrl(s.fxx));if(i===0){firstW=imgEl.naturalWidth;firstH=imgEl.naturalHeight;gif.options.width=firstW;gif.options.height=firstH;}const canvas=document.createElement('canvas');canvas.width=firstW;canvas.height=firstH;canvas.getContext('2d').drawImage(imgEl,0,0);gif.addFrame(canvas,{delay:700,copy:true});}catch(e){console.warn(`Frame ${s.fxx}h failed:`,e);}
+    }
+    if(gif.frames.length===0)throw new Error('No frames loaded');
+    pText.textContent='Encoding GIF…';pFill.style.width='70%';
+    await new Promise((resolve,reject)=>{
+      gif.on('progress',p=>{pFill.style.width=(70+p*30)+'%';});
+      gif.on('finished',blob=>{pFill.style.width='100%';pText.textContent='Done!';const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`${MODEL}_${region}_f${gifSteps[0].fxx}-${gifSteps[gifSteps.length-1].fxx}_animation.gif`;a.click();URL.revokeObjectURL(url);resolve();});
+      gif.on('error',reject);gif.render();
+    });
+  }catch(e){pText.textContent='Error: '+e.message;console.error('GIF error:',e);}
+  finally{setTimeout(()=>{progress.classList.remove('show');if(btn){btn.textContent='⬇ GIF';btn.disabled=false;}if(btnM)btnM.textContent='⬇ GIF';pFill.style.width='0%';},2000);}
+}
+
+function loadScript(src){return new Promise((resolve,reject)=>{if(document.querySelector(`script[src="${src}"]`)){resolve();return;}const s=document.createElement('script');s.src=src;s.onload=resolve;s.onerror=reject;document.head.appendChild(s);});}
+function loadImage(src){return new Promise((resolve,reject)=>{const img=new Image();img.crossOrigin='anonymous';img.onload=()=>resolve(img);img.onerror=reject;img.src=src+'?t='+Date.now();});}
+
+// ── ERROR ─────────────────────────────────────────────────────────────────────
+function showError(msg){const e=document.getElementById('error-banner');e.textContent='⚠ '+msg;e.classList.add('show');}
+function hideError(){document.getElementById('error-banner').classList.remove('show');}
+
+// ── KEYBOARD ──────────────────────────────────────────────────────────────────
+document.addEventListener('keydown',e=>{
+  if(compareMode){
+    if(e.key==='ArrowLeft'){e.preventDefault();cmpStep(-1);}
+    if(e.key==='ArrowRight'){e.preventDefault();cmpStep(1);}
+    if(e.key===' '){e.preventDefault();toggleCmpPlay();}
+  } else {
+    if(e.key==='ArrowLeft') selectStep(Math.max(0,activeIdx<=0?0:activeIdx-1));
+    if(e.key==='ArrowRight') selectStep(Math.min(STEPS.length-1,activeIdx<0?0:activeIdx+1));
+    if(e.key===' '){e.preventDefault();togglePlay();}
+  }
+});
+</script>
+</div><!-- /#rf-root -->
+</body>
+</html>
