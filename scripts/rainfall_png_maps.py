@@ -716,11 +716,44 @@ def fetch_ecmwf_all_hours(res=0.25, max_hour=None, cycle='auto'):
     print("  Finding latest available ECMWF run...")
     probe_path = os.path.join(tempfile.gettempdir(), "ecmwf_probe.grib2")
     try:
-        probe = client.retrieve(
-            step=24, type="fc", param="tp",
-            area=[BBOX['north'], BBOX['west'], BBOX['south'], BBOX['east']],
-            target=probe_path)
-        run_dt = probe.datetime
+        # ── CYCLE FIX: respect explicit cycle input ────────────────────────
+        # Previously the probe had no date/time pinned, so cycle input was
+        # silently ignored — ECMWF always fetched the server's latest run
+        # regardless of what cycle was selected in the workflow dispatch.
+        # Now: explicit cycle loops through last 3 days pinning date+time
+        # so a manual backfill run (e.g. cycle=12) lands on the correct run.
+        # Auto mode (cron) is unchanged — client picks the latest run itself.
+        if cycle != 'auto':
+            target_hour = int(cycle)
+            now = datetime.now(timezone.utc)
+            run_dt = None
+            for days_back in range(3):
+                candidate_date = (now - timedelta(days=days_back)).strftime('%Y-%m-%d')
+                try:
+                    print(f"    Trying ECMWF {candidate_date} {target_hour:02d}Z F024...")
+                    probe = client.retrieve(
+                        date=candidate_date,
+                        time=target_hour,
+                        step=24, type="fc", param="tp",
+                        area=[BBOX['north'], BBOX['west'], BBOX['south'], BBOX['east']],
+                        target=probe_path)
+                    run_dt = probe.datetime
+                    print(f"    Found! Run: {run_dt.strftime('%Y-%m-%d %H UTC')}")
+                    break
+                except Exception as e:
+                    print(f"    {candidate_date} {target_hour:02d}Z not available: {e}")
+                    continue
+            if run_dt is None:
+                print("  [ECMWF] Could not find requested cycle — check date/availability.")
+                return None, None
+        else:
+            probe = client.retrieve(
+                step=24, type="fc", param="tp",
+                area=[BBOX['north'], BBOX['west'], BBOX['south'], BBOX['east']],
+                target=probe_path)
+            run_dt = probe.datetime
+            print(f"    Found! Run: {run_dt.strftime('%Y-%m-%d %H UTC')}")
+        # ── END CYCLE FIX ─────────────────────────────────────────────────
         da = open_grib2_get_rainfall(probe_path)
         if da is None:
             raise RuntimeError("Could not extract tp from probe request")
