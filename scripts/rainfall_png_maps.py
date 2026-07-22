@@ -733,19 +733,31 @@ def fetch_icon_single(run_dt, forecast_hour):
     """
     Download ONE ICON Global tot_prec file from opendata.dwd.de.
 
-    URL pattern (confirmed July 2026):
-      {ICON_BASE}/{HH}/tot_prec/
-        icon_global_regular-lat-lon_single-level_{YYYYMMDDHH}_{FFF}_TOT_PREC.grib2.bz2
+    CONFIRMED filename pattern (from live server directory listing, July 2026):
+      icon_global_icosahedral_single-level_{YYYYMMDDHH}_{FFF}_TOT_PREC.grib2.bz2
+
+    IMPORTANT — ICOSAHEDRAL GRID:
+      DWD ICON Global tot_prec is on the native icosahedral (triangular)
+      unstructured grid, NOT regular-lat-lon. cfgrib reads it as 1D arrays
+      of (lat, lon, value) scatter points rather than a 2D grid. We remap
+      these scatter points onto our target regular 0.25-deg lat/lon grid
+      using scipy's NearestNDInterpolator, which is fast and robust for
+      this kind of unstructured→regular mapping.
 
     Files are bz2-compressed — decompressed in-memory before cfgrib reads them.
-    Returns (lats, lons, increment_mm) — the rain in THIS hour only, not cumulative.
+    Returns (lats_1d, lons_1d, grid_2d) on a regular 0.25-deg grid over BBOX.
+    The value is the rain in THIS hour only (not cumulative).
     fetch_icon_all_hours() handles accumulation into running totals.
     """
+    from scipy.interpolate import NearestNDInterpolator
+
     run_str  = f"{run_dt.hour:02d}"
     date_str = run_dt.strftime('%Y%m%d')
     fxx_str  = f"{forecast_hour:03d}"
+
+    # Correct filename — icosahedral, not regular-lat-lon
     filename = (
-        f"icon_global_regular-lat-lon_single-level_"
+        f"icon_global_icosahedral_single-level_"
         f"{date_str}{run_str}_{fxx_str}_TOT_PREC.grib2.bz2"
     )
     url = f"{ICON_BASE}/{run_str}/tot_prec/{filename}"
@@ -760,8 +772,7 @@ def fetch_icon_single(run_dt, forecast_hour):
             f"Response too small ({len(compressed)} bytes) — "
             f"probably an HTML error page, not a GRIB2 file")
 
-    # Decompress bz2 — DWD always bz2-compresses these files
-    # bz2 magic bytes = b'BZh', GRIB2 magic bytes = b'GRIB'
+    # Decompress bz2
     try:
         raw = bz2.decompress(compressed)
     except OSError as e:
@@ -771,7 +782,6 @@ def fetch_icon_single(run_dt, forecast_hour):
         raise RuntimeError(
             f"Decompressed content is not GRIB2 (first 4 bytes: {raw[:4]!r})")
 
-    # Write temp file for cfgrib — needs a real path on disk, not bytes
     tmp_path = os.path.join(
         tempfile.gettempdir(),
         f"icon_{date_str}{run_str}_f{fxx_str}.grib2"
@@ -784,20 +794,28 @@ def fetch_icon_single(run_dt, forecast_hour):
         if da is None:
             raise RuntimeError("Could not extract tot_prec from GRIB2")
 
-        lats = da.latitude.values
-        lons = da.longitude.values
-        vals = da.values    # already in mm — no unit conversion needed
+        # Icosahedral grid — lat/lon are 1D scatter point arrays
+        src_lats = da.latitude.values.ravel()
+        src_lons = da.longitude.values.ravel()
+        src_vals = da.values.ravel()   # already in mm
 
-        if vals.ndim == 3:
-            vals = vals[-1]
-        # Ensure lats are south→north (ascending) for RegularGridInterpolator
-        if lats[0] > lats[-1]:
-            lats = lats[::-1]
-            vals = vals[::-1, :]
+        src_vals = np.where(np.isnan(src_vals), 0.0, src_vals)
+        src_vals = np.clip(src_vals, 0.0, None)
 
-        vals = np.where(np.isnan(vals), 0.0, vals)
-        vals = np.clip(vals, 0.0, None)   # hourly increments can't be negative
-        return lats, lons, vals
+        # Remap to regular 0.25-deg grid over BBOX using nearest-neighbour
+        # NearestNDInterpolator is the right tool for unstructured→regular:
+        # fast, no triangulation artifacts, handles sparse/dense regions well.
+        out_res  = 0.25
+        out_lats = np.arange(BBOX['south'], BBOX['north'] + out_res, out_res)
+        out_lons = np.arange(BBOX['west'],  BBOX['east']  + out_res, out_res)
+        out_lon2d, out_lat2d = np.meshgrid(out_lons, out_lats)
+
+        interp   = NearestNDInterpolator(
+            list(zip(src_lats, src_lons)), src_vals)
+        out_grid = interp(out_lat2d, out_lon2d)
+        out_grid = np.clip(out_grid, 0.0, None)
+
+        return out_lats, out_lons, out_grid
 
     finally:
         try: os.unlink(tmp_path)
