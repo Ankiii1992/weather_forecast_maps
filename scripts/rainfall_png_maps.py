@@ -794,9 +794,24 @@ def fetch_icon_single(run_dt, forecast_hour):
         if da is None:
             raise RuntimeError("Could not extract tot_prec from GRIB2")
 
-        # Icosahedral grid — lat/lon are 1D scatter point arrays
-        src_lats = da.latitude.values.ravel()
-        src_lons = da.longitude.values.ravel()
+        # Icosahedral GRIB2 uses 'lat'/'lon' coordinate names, not
+        # 'latitude'/'longitude' like regular-lat-lon grids. Try both.
+        coords = list(da.coords)
+        if 'latitude' in coords:
+            src_lats = da.latitude.values.ravel()
+            src_lons = da.longitude.values.ravel()
+        elif 'lat' in coords:
+            src_lats = da.lat.values.ravel()
+            src_lons = da.lon.values.ravel()
+        else:
+            lat_coord = next((c for c in coords if 'lat' in c.lower()), None)
+            lon_coord = next((c for c in coords if 'lon' in c.lower()), None)
+            if lat_coord is None or lon_coord is None:
+                raise RuntimeError(
+                    f"Could not find lat/lon coordinates in GRIB2. "
+                    f"Available coords: {coords}")
+            src_lats = da[lat_coord].values.ravel()
+            src_lons = da[lon_coord].values.ravel()
         src_vals = da.values.ravel()   # already in mm
 
         src_vals = np.where(np.isnan(src_vals), 0.0, src_vals)
