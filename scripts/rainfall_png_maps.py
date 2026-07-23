@@ -878,26 +878,21 @@ def fetch_icon_single(run_dt, forecast_hour):
 
 def fetch_icon_all_hours(max_hour=None, cycle='auto'):
     """
-    Download all ICON tot_prec hourly increments and accumulate them into
-    running totals — the same format GFS and ECMWF produce — so the rest
-    of the pipeline works identically for all three models.
+    Download ICON Global tot_prec at every forecast step and return running
+    totals — identical structure to fetch_gfs_all_hours / fetch_ecmwf_all_hours.
 
-    WHY WE FETCH EVERY HOUR:
-      ICON tot_prec[fxx] = rain in hour (fxx-1)→fxx only.
-      To get total rain from run start to hour N we must sum every
-      increment from hour 1 to hour N. Skipping any middle hour would
-      make all subsequent totals wrong.
-
-      Example for Day 1 (F024):
-        total = inc[F001] + inc[F002] + ... + inc[F024]
-
-      We fetch all 78 hourly steps + 3-hourly steps beyond that.
-      Only steps in forecast_hours get stored in results — intermediate
-      steps are used for accumulation then discarded.
+    IMPORTANT CORRECTION — tot_prec IS a running total, not a 1h increment:
+      ICON tot_prec stepRange at F001 = "0-1" (accumulated hour 0 to 1)
+                             at F024 = "0-24" (accumulated hour 0 to 24)
+                             at F168 = "0-168" (accumulated hour 0 to 168)
+      It is the TOTAL precipitation since run start — identical convention
+      to GFS APCP and ECMWF tp. We do NOT need to accumulate — just fetch
+      each step and use the values directly, exactly like GFS/ECMWF.
+      The previous double-accumulation was the cause of unrealistic totals
+      (400-1000mm over 7 days) seen on the maps.
 
     Returns (run_dt, results_dict)
       results_dict = {fxx: (lats, lons, running_total_grid)}
-      — identical structure to fetch_gfs_all_hours() / fetch_ecmwf_all_hours().
     Returns (None, None) if no run is available yet.
     """
     now = datetime.now(timezone.utc)
@@ -918,13 +913,13 @@ def fetch_icon_all_hours(max_hour=None, cycle='auto'):
                 if dt <= now:
                     candidates.append(dt)
 
-    # Probe with F001 — ICON files appear ~5-6h after init
+    # Discover latest available run — probe with F001
     run_dt = None
     print("  Finding latest available ICON Global run...")
     for candidate in candidates:
         try:
             print(f"    Trying {candidate.strftime('%Y-%m-%d %H UTC')} F001...")
-            lats, lons, inc = fetch_icon_single(candidate, 1)
+            lats, lons, vals = fetch_icon_single(candidate, 1)
             run_dt = candidate
             print(f"    Found! Run: {run_dt.strftime('%Y-%m-%d %H UTC')}")
             break
@@ -936,15 +931,16 @@ def fetch_icon_all_hours(max_hour=None, cycle='auto'):
         print("  [ICON] Could not find any available ICON run.")
         return None, None
 
-    run_max        = max_hour or MODEL_MAX_HOURS['ICON'].get(run_dt.hour, 120)
-    native_steps   = icon_native_steps(run_max)
+    run_max      = max_hour or MODEL_MAX_HOURS['ICON'].get(run_dt.hour, 120)
+    native_steps = icon_native_steps(run_max)
+    # forecast_hours = steps we fetch and store
+    # Since tot_prec is already cumulative, we only need to fetch the steps
+    # we want to display — no need to fetch every intermediate hour.
     forecast_hours = fine_grained_steps(
         run_max, native_steps, FINE_CUTOFF_HOUR['ICON'])
 
-    total_native = len([h for h in native_steps if h > 0])
     print(f"  [ICON] Run {run_dt.hour:02d}Z → max {run_max}h → "
-          f"{len(forecast_hours)} steps to store "
-          f"(fetching all {total_native} native steps for accumulation)")
+          f"{len(forecast_hours)} steps to fetch and store")
 
     # Availability check — probe final step before committing to full fetch
     print(f"  [ICON] Checking if F{run_max:03d} (final step) is available...")
@@ -956,37 +952,16 @@ def fetch_icon_all_hours(max_hour=None, cycle='auto'):
         print(f"  [ICON] Run still uploading — exiting cleanly, retry later.")
         return None, None
 
-    # Accumulation loop — walk every native step in order
-    running_total = None
-    results       = {}
-    forecast_set  = set(forecast_hours)
-    all_steps     = sorted(h for h in native_steps if h > 0)
-
-    for fxx in all_steps:
-        if fxx > run_max:
-            break
-
-        is_store = fxx in forecast_set
-        print(f"  Fetching ICON F{fxx:03d} ({day_label(fxx)})..."
-              + (" [store]" if is_store else ""))
-
+    # Fetch each step directly — tot_prec is already cumulative since run start
+    results = {}
+    for fxx in forecast_hours:
+        print(f"  Fetching ICON F{fxx:03d} ({day_label(fxx)})...")
         try:
-            lats, lons, increment = fetch_icon_single(run_dt, fxx)
-
-            if running_total is None:
-                running_total = increment.copy()
-            else:
-                running_total = running_total + increment
-
-            if is_store:
-                results[fxx] = (lats, lons, running_total.copy())
-                print(f"    running total max: {np.nanmax(running_total):.1f} mm")
-
+            lats, lons, vals = fetch_icon_single(run_dt, fxx)
+            results[fxx] = (lats, lons, vals)
+            print(f"    OK — max: {np.nanmax(vals):.1f} mm")
         except Exception as e:
-            print(f"    ERROR F{fxx:03d}: {e} — skipping increment")
-            if running_total is not None:
-                print(f"    WARNING: running total may be underestimated "
-                      f"beyond F{fxx:03d} due to missing increment")
+            print(f"    ERROR F{fxx:03d}: {e} — skipping")
 
     print(f"  [ICON] Done — {len(results)} steps stored.")
     return run_dt, results
