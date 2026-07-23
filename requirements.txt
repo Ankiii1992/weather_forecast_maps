@@ -11,3 +11,4 @@ ecmwf-opendata
 Pillow
 boto3
 xarray
+netCDF4
