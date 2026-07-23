@@ -147,7 +147,7 @@ jobs:
           pip install cfgrib xarray netCDF4
           pip install -r requirements.txt
 
-      # Cache the 123MB weights file so it's only downloaded on first run.
+      # Cache the 123MB weights file so it is only downloaded on first run.
       # GitHub Actions cache persists for 7 days and resets if unused.
       - name: Cache ICON remapping weights
         uses: actions/cache@v4
@@ -164,6 +164,8 @@ jobs:
             -o geodata/ICON_GLOBAL2WORLD_025_EASY.tar.bz2 \
             "https://opendata.dwd.de/weather/lib/cdo/ICON_GLOBAL2WORLD_025_EASY.tar.bz2"
           tar -xjf geodata/ICON_GLOBAL2WORLD_025_EASY.tar.bz2 -C geodata/
+          mv geodata/ICON_GLOBAL2WORLD_025_EASY/* geodata/
+          rm -rf geodata/ICON_GLOBAL2WORLD_025_EASY
           rm geodata/ICON_GLOBAL2WORLD_025_EASY.tar.bz2
           ls -lh geodata/weights_icogl2world_025.nc
 
