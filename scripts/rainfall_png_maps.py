@@ -729,39 +729,82 @@ def fetch_ecmwf_all_hours(res=0.25, max_hour=None, cycle='auto'):
 
 # ── ICON FETCH ────────────────────────────────────────────────────────────────
 
+# ── ICON WEIGHTS (loaded once, reused for every file) ─────────────────────────
+# Pre-computed CDO remapping weights from DWD's ICON_GLOBAL2WORLD_025_EASY
+# package. Maps the icosahedral unstructured grid (2,949,120 points) to a
+# regular 0.25-deg global lat/lon grid (721x1440). Stored in geodata/ and
+# loaded once at first call via _load_icon_weights().
+_ICON_WEIGHTS = None   # cache: (src_addr, dst_addr, remap_wt, dst_size)
+
+ICON_WEIGHTS_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    '..', 'geodata', 'weights_icogl2world_025.nc')
+
+def _load_icon_weights():
+    """
+    Load CDO remapping weights from geodata/weights_icogl2world_025.nc.
+    Called once and cached in _ICON_WEIGHTS for reuse across all hourly fetches.
+    Raises FileNotFoundError with a clear message if the file is missing.
+    """
+    global _ICON_WEIGHTS
+    if _ICON_WEIGHTS is not None:
+        return _ICON_WEIGHTS
+
+    weights_path = os.path.abspath(ICON_WEIGHTS_PATH)
+    if not os.path.exists(weights_path):
+        raise FileNotFoundError(
+            f"ICON weights file not found: {weights_path}\n"
+            f"  Download ICON_GLOBAL2WORLD_025_EASY.tar.bz2 from\n"
+            f"  https://opendata.dwd.de/weather/lib/cdo/\n"
+            f"  and place weights_icogl2world_025.nc in geodata/")
+
+    print(f"  [ICON] Loading remapping weights from {weights_path} ...")
+    import xarray as xr
+    w = xr.open_dataset(weights_path)
+    src_addr = w.src_address.values - 1   # 1-based to 0-based
+    dst_addr = w.dst_address.values - 1
+    remap_wt = w.remap_matrix.values.ravel()
+    dst_size = int(w.sizes['dst_grid_size'])   # 1038240 = 721 x 1440
+    w.close()
+    print(f"  [ICON] Weights loaded — {dst_size:,} destination points")
+
+    _ICON_WEIGHTS = (src_addr, dst_addr, remap_wt, dst_size)
+    return _ICON_WEIGHTS
+
+
 def fetch_icon_single(run_dt, forecast_hour):
     """
-    Download ONE ICON Global tot_prec file from opendata.dwd.de.
+    Download ONE ICON Global tot_prec file from opendata.dwd.de and return
+    the hourly rainfall increment on a regular 0.25-deg lat/lon grid.
 
-    CONFIRMED filename pattern (from live server directory listing, July 2026):
+    Filename pattern (confirmed from live DWD server, July 2026):
       icon_global_icosahedral_single-level_{YYYYMMDDHH}_{FFF}_TOT_PREC.grib2.bz2
 
-    IMPORTANT — ICOSAHEDRAL GRID:
-      DWD ICON Global tot_prec is on the native icosahedral (triangular)
-      unstructured grid, NOT regular-lat-lon. cfgrib reads it as 1D arrays
-      of (lat, lon, value) scatter points rather than a 2D grid. We remap
-      these scatter points onto our target regular 0.25-deg lat/lon grid
-      using scipy's NearestNDInterpolator, which is fast and robust for
-      this kind of unstructured→regular mapping.
+    REMAPPING APPROACH (from DWD official CDO guideline):
+      ICON Global data is on a native icosahedral (triangular) unstructured
+      grid. cfgrib reads the 2,949,120 values as a flat 1D array with no
+      lat/lon coordinates in the GRIB2 file. We remap to regular lat/lon
+      using pre-computed CDO nearest-neighbour weights from DWD's own
+      ICON_GLOBAL2WORLD_025_EASY package (geodata/weights_icogl2world_025.nc).
+      This is exactly the method DWD recommends in their opendata CDO guide.
+      Weights are loaded once and cached — remapping each file takes <1 second.
 
-    Files are bz2-compressed — decompressed in-memory before cfgrib reads them.
-    Returns (lats_1d, lons_1d, grid_2d) on a regular 0.25-deg grid over BBOX.
-    The value is the rain in THIS hour only (not cumulative).
-    fetch_icon_all_hours() handles accumulation into running totals.
+    Returns (lats, lons, increment_mm) on a regular 0.25-deg grid over BBOX.
+    Value is rain in THIS hour only. fetch_icon_all_hours() accumulates.
     """
-    from scipy.interpolate import NearestNDInterpolator
+    import cfgrib
 
     run_str  = f"{run_dt.hour:02d}"
     date_str = run_dt.strftime('%Y%m%d')
     fxx_str  = f"{forecast_hour:03d}"
 
-    # Correct filename — icosahedral, not regular-lat-lon
     filename = (
         f"icon_global_icosahedral_single-level_"
         f"{date_str}{run_str}_{fxx_str}_TOT_PREC.grib2.bz2"
     )
     url = f"{ICON_BASE}/{run_str}/tot_prec/{filename}"
 
+    # ── Download ────────────────────────────────────────────────────────
     r = requests.get(url, timeout=120, stream=True)
     if r.status_code != 200:
         raise RuntimeError(f"HTTP {r.status_code}: {url}")
@@ -772,70 +815,66 @@ def fetch_icon_single(run_dt, forecast_hour):
             f"Response too small ({len(compressed)} bytes) — "
             f"probably an HTML error page, not a GRIB2 file")
 
-    # Decompress bz2
+    # ── Decompress bz2 ──────────────────────────────────────────────────
     try:
         raw = bz2.decompress(compressed)
     except OSError as e:
         raise RuntimeError(f"bz2 decompress failed: {e}")
 
     if raw[:4] != b'GRIB':
-        raise RuntimeError(
-            f"Decompressed content is not GRIB2 (first 4 bytes: {raw[:4]!r})")
+        raise RuntimeError(f"Not GRIB2 after decompression (got {raw[:4]!r})")
 
+    # ── Read flat 1D values from GRIB2 ──────────────────────────────────
+    # cfgrib reads unstructured_grid as flat 1D — no lat/lon, that is expected.
+    # Coordinates come from the weights file, not the GRIB2 file.
     tmp_path = os.path.join(
         tempfile.gettempdir(),
-        f"icon_{date_str}{run_str}_f{fxx_str}.grib2"
-    )
+        f"icon_{date_str}{run_str}_f{fxx_str}.grib2")
     try:
         with open(tmp_path, 'wb') as f:
             f.write(raw)
 
-        da = open_grib2_get_rainfall(tmp_path)
-        if da is None:
-            raise RuntimeError("Could not extract tot_prec from GRIB2")
+        datasets = cfgrib.open_datasets(tmp_path)
+        src_vals = None
+        for ds in datasets:
+            for v in ['tp', 'acpcp', 'unknown'] + list(ds.data_vars):
+                if v in ds:
+                    src_vals = ds[v].values.ravel().astype(np.float64)
+                    break
+            if src_vals is not None:
+                break
 
-        # Icosahedral GRIB2 uses 'lat'/'lon' coordinate names, not
-        # 'latitude'/'longitude' like regular-lat-lon grids. Try both.
-        coords = list(da.coords)
-        if 'latitude' in coords:
-            src_lats = da.latitude.values.ravel()
-            src_lons = da.longitude.values.ravel()
-        elif 'lat' in coords:
-            src_lats = da.lat.values.ravel()
-            src_lons = da.lon.values.ravel()
-        else:
-            lat_coord = next((c for c in coords if 'lat' in c.lower()), None)
-            lon_coord = next((c for c in coords if 'lon' in c.lower()), None)
-            if lat_coord is None or lon_coord is None:
-                raise RuntimeError(
-                    f"Could not find lat/lon coordinates in GRIB2. "
-                    f"Available coords: {coords}")
-            src_lats = da[lat_coord].values.ravel()
-            src_lons = da[lon_coord].values.ravel()
-        src_vals = da.values.ravel()   # already in mm
-
-        src_vals = np.where(np.isnan(src_vals), 0.0, src_vals)
-        src_vals = np.clip(src_vals, 0.0, None)
-
-        # Remap to regular 0.25-deg grid over BBOX using nearest-neighbour
-        # NearestNDInterpolator is the right tool for unstructured→regular:
-        # fast, no triangulation artifacts, handles sparse/dense regions well.
-        out_res  = 0.25
-        out_lats = np.arange(BBOX['south'], BBOX['north'] + out_res, out_res)
-        out_lons = np.arange(BBOX['west'],  BBOX['east']  + out_res, out_res)
-        out_lon2d, out_lat2d = np.meshgrid(out_lons, out_lats)
-
-        interp   = NearestNDInterpolator(
-            list(zip(src_lats, src_lons)), src_vals)
-        out_grid = interp(out_lat2d, out_lon2d)
-        out_grid = np.clip(out_grid, 0.0, None)
-
-        return out_lats, out_lons, out_grid
+        if src_vals is None:
+            raise RuntimeError("Could not extract tot_prec values from GRIB2")
 
     finally:
         try: os.unlink(tmp_path)
         except: pass
 
+    # ── Remap icosahedral → regular 0.25-deg global grid ────────────────
+    src_addr, dst_addr, remap_wt, dst_size = _load_icon_weights()
+
+    src_vals = np.where(np.isnan(src_vals), 0.0, src_vals)
+    src_vals = np.clip(src_vals, 0.0, None)
+
+    dst_vals = np.zeros(dst_size, dtype=np.float64)
+    np.add.at(dst_vals, dst_addr, remap_wt * src_vals[src_addr])
+
+    # Global grid: 721 rows (lat -90→+90), 1440 cols (lon 0→359.75), 0.25-deg
+    grid_global = dst_vals.reshape(721, 1440)
+
+    # ── Crop to BBOX ─────────────────────────────────────────────────────
+    lat_start = int((BBOX['south'] - (-90)) / 0.25)
+    lat_end   = int((BBOX['north'] - (-90)) / 0.25)
+    lon_start = int(BBOX['west']  / 0.25)
+    lon_end   = int(BBOX['east']  / 0.25)
+
+    out_grid = np.clip(
+        grid_global[lat_start:lat_end+1, lon_start:lon_end+1], 0.0, None)
+    out_lats = np.arange(BBOX['south'], BBOX['north'] + 0.25, 0.25)
+    out_lons = np.arange(BBOX['west'],  BBOX['east']  + 0.25, 0.25)
+
+    return out_lats, out_lons, out_grid
 
 def fetch_icon_all_hours(max_hour=None, cycle='auto'):
     """
