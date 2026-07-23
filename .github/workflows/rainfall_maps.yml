@@ -27,12 +27,11 @@ on:
 jobs:
 
   # ── JOB 1: GFS + ECMWF ───────────────────────────────────────────────────
-  # Skipped when model = ICON (no point running GFS/ECMWF for an ICON-only run)
+  # Skipped when model = ICON only.
   generate-maps:
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    if: |
-      github.event.inputs.model != 'ICON'
+    if: github.event.inputs.model != 'ICON'
 
     steps:
       - name: Checkout repository
@@ -114,7 +113,7 @@ jobs:
 
   # ── JOB 2: ICON ──────────────────────────────────────────────────────────
   # Only runs when model = ICON or all.
-  # Runs independently — if ICON fails, Job 1 output is unaffected.
+  # Weights file is cached between runs — only downloaded on first run.
   generate-icon-maps:
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -145,8 +144,33 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install eccodes==1.6.1
-          pip install cfgrib xarray
+          pip install cfgrib xarray netCDF4
           pip install -r requirements.txt
+
+      # Cache the 123MB weights file so it's only downloaded on first run.
+      # GitHub Actions cache persists for 7 days and resets if unused.
+      - name: Cache ICON remapping weights
+        uses: actions/cache@v4
+        id: icon-weights-cache
+        with:
+          path: geodata/weights_icogl2world_025.nc
+          key: icon-weights-0026-R03B07-025
+
+      - name: Download ICON remapping weights
+        if: steps.icon-weights-cache.outputs.cache-hit != 'true'
+        run: |
+          echo "Cache miss — downloading ICON weights from DWD..."
+          curl -L --retry 3 --retry-delay 5 \
+            -o geodata/ICON_GLOBAL2WORLD_025_EASY.tar.bz2 \
+            "https://opendata.dwd.de/weather/lib/cdo/ICON_GLOBAL2WORLD_025_EASY.tar.bz2"
+          tar -xjf geodata/ICON_GLOBAL2WORLD_025_EASY.tar.bz2 -C geodata/
+          rm geodata/ICON_GLOBAL2WORLD_025_EASY.tar.bz2
+          ls -lh geodata/weights_icogl2world_025.nc
+
+      - name: Confirm weights file present
+        run: |
+          echo "Cache hit: ${{ steps.icon-weights-cache.outputs.cache-hit }}"
+          ls -lh geodata/weights_icogl2world_025.nc
 
       - name: Download existing meta.json from R2 (for preservation)
         run: |
@@ -185,6 +209,7 @@ jobs:
           echo "## ICON Rainfall Maps" >> $GITHUB_STEP_SUMMARY
           echo "- Model: ICON Global (DWD)" >> $GITHUB_STEP_SUMMARY
           echo "- Cycle: ${{ github.event.inputs.cycle }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Weights cache hit: ${{ steps.icon-weights-cache.outputs.cache-hit }}" >> $GITHUB_STEP_SUMMARY
           echo "- Time: $(date -u)" >> $GITHUB_STEP_SUMMARY
           PNG_COUNT=$(find output -name "*.png" 2>/dev/null | wc -l)
           echo "- PNGs generated: $PNG_COUNT" >> $GITHUB_STEP_SUMMARY
